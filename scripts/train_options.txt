@@ -1,0 +1,60 @@
+usage: train.py [-h] [--device DEVICE] [--logger {wandb,tensorboard}] [--name NAME] [--version VERSION] [--project PROJECT] [--resume RESUME] [--offline]
+                [--profiler PROFILER] [--data-path DATA_PATH] [--batch-size BATCH_SIZE] [--num-workers NUM_WORKERS]
+                [--limit_train_batches LIMIT_TRAIN_BATCHES] [--limit_val_batches LIMIT_VAL_BATCHES] [--shuffle SHUFFLE] [--balance-frac BALANCE_FRAC]
+                [--num-iters NUM_ITERS] [--in-feats IN_FEATS] [--hit-feats HIT_FEATS] [--nexus-feats NEXUS_FEATS] [--interaction-feats INTERACTION_FEATS]
+                [--instance-feats INSTANCE_FEATS] [--event] [--semantic] [--filter] [--instance] [--vertex] [--spacepoint] [--no-checkpointing]
+                [--epochs EPOCHS] [--learning-rate LEARNING_RATE]
+
+options:
+  -h, --help            show this help message and exit
+  --device DEVICE       Index of GPU device to train with
+  --logger {wandb,tensorboard}
+                        Which logging method to use
+  --name NAME           Training instance name, for logging purposes
+  --version VERSION     Training version name, for logging purposes
+  --project PROJECT     wandb project to log to
+  --resume RESUME       model checkpoint file to resume training with
+  --offline             write wandb logs offline
+  --profiler PROFILER   Enable requested profiler
+
+data:
+  Data module configuration
+
+  --data-path DATA_PATH
+                        Location of input data file
+  --batch-size BATCH_SIZE
+                        Size of each batch of graphs
+  --num-workers NUM_WORKERS
+                        Number of data loader worker processes
+  --limit_train_batches LIMIT_TRAIN_BATCHES
+                        Max number of training batches to be used
+  --limit_val_batches LIMIT_VAL_BATCHES
+                        Max number of validation batches to be used
+  --shuffle SHUFFLE     Dataset shuffling scheme to use
+  --balance-frac BALANCE_FRAC
+                        Fraction of dataset to use for workload balancing
+
+model:
+  NuGraph3 model configuration
+
+  --num-iters NUM_ITERS
+                        Number of message-passing iterations
+  --in-feats IN_FEATS   Number of input node features
+  --hit-feats HIT_FEATS
+                        Hidden dimensionality of hit convolutions
+  --nexus-feats NEXUS_FEATS
+                        Hidden dimensionality of nexus convolutions
+  --interaction-feats INTERACTION_FEATS
+                        Hidden dimensionality of interaction layer
+  --instance-feats INSTANCE_FEATS
+                        Hidden dimensionality of object condensation
+  --event               Enable event classification head
+  --semantic            Enable semantic segmentation head
+  --filter              Enable background filter head
+  --instance            Enable instance segmentation head
+  --vertex              Enable vertex regression head
+  --spacepoint          Enable spacepoint prediction head
+  --no-checkpointing    Disable checkpointing during training
+  --epochs EPOCHS       Maximum number of epochs to train for
+  --learning-rate LEARNING_RATE
+                        Max learning rate during training

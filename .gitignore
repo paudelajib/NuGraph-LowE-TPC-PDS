@@ -1,0 +1,271 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# PyInstaller
+#  Usually these files are written by a python script from a template
+#  before PyInstaller builds the exe, so as to inject date/other infos into it.
+*.manifest
+*.spec
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+cover/
+
+# Translations
+*.mo
+*.pot
+
+# Django stuff:
+*.log
+local_settings.py
+db.sqlite3
+db.sqlite3-journal
+
+# Flask stuff:
+instance/
+.webassets-cache
+
+# Scrapy stuff:
+.scrapy
+
+# Sphinx documentation
+docs/_build/
+
+# PyBuilder
+.pybuilder/
+target/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# IPython
+profile_default/
+ipython_config.py
+
+# pyenv
+#   For a library or package, you might want to ignore these files since the code is
+#   intended to run in multiple environments; otherwise, check them in:
+# .python-version
+
+# pipenv
+#   According to pypa/pipenv#598, it is recommended to include Pipfile.lock in version control.
+#   However, in case of collaboration, if having platform-specific dependencies or dependencies
+#   having no cross-platform support, pipenv may install dependencies that don't work, or not
+#   install all needed dependencies.
+#Pipfile.lock
+
+# poetry
+#   Similar to Pipfile.lock, it is generally recommended to include poetry.lock in version control.
+#   This is especially recommended for binary packages to ensure reproducibility, and is more
+#   commonly ignored for libraries.
+#   https://python-poetry.org/docs/basic-usage/#commit-your-poetrylock-file-to-version-control
+#poetry.lock
+
+# pdm
+#   Similar to Pipfile.lock, it is generally recommended to include pdm.lock in version control.
+#pdm.lock
+#   pdm stores project-wide configurations in .pdm.toml, but it is recommended to not include it
+#   in version control.
+#   https://pdm.fming.dev/#use-with-ide
+.pdm.toml
+
+# PEP 582; used by e.g. github.com/David-OConnor/pyflow and github.com/pdm-project/pdm
+__pypackages__/
+
+# Celery stuff
+celerybeat-schedule
+celerybeat.pid
+
+# SageMath parsed files
+*.sage.py
+
+# Environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Spyder project settings
+.spyderproject
+.spyproject
+
+# Rope project settings
+.ropeproject
+
+# mkdocs documentation
+/site
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Pyre type checker
+.pyre/
+
+# pytype static type analyzer
+.pytype/
+
+# Cython debug symbols
+cython_debug/
+
+# PyCharm
+#  JetBrains specific template is maintained in a separate JetBrains.gitignore that can
+#  be found at https://github.com/github/gitignore/blob/main/Global/JetBrains.gitignore
+#  and can be added to the global gitignore or merged into this file.  For a more nuclear
+#  option (not recommended) you can uncomment the following to ignore the entire idea folder.
+#.idea/
+
+logs
+
+# image extensions
+*.html
+*.png
+*.pdf
+
+# vscode workspaces
+*.code-workspace
+
+# checkpoint files
+*.ckpt
+
+# specific directories
+workspace
+
+# =============================================================================
+# Local NuGraph generated files / large outputs
+# =============================================================================
+
+# Training logs and checkpoints
+logs/
+*.ckpt
+*.log
+*.pid
+
+# Large processed data / prediction files
+data/
+*.h5
+*.root
+scripts/merged1_*
+scripts/merged_large*
+scripts/*test_predictions*.h5
+scripts/*predictions*.h5
+
+# Plot/report outputs
+scripts/plots_*/
+scripts/final_plots_tpc_vs_tpcpds/
+scripts/escc_final_report/
+scripts/*confusion*.png
+scripts/*confusion*.csv
+scripts/*probabilities*.png
+scripts/*PCC*.png
+
+# Python / Jupyter / Emacs clutter
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+*~
+#*#
+.#*
+
+# Temporary backups
+*.bak
+*.before_*
+
+# Emacs autosave files
+\#*\#
+.\#*
+
+# Local gitignore backups
+.gitignore.backup_*
+
+# Backup folders / old snapshots
+backup_before_true_optical/
+scripts/diff_snapshots/
+
+# Old hitgraph backup versions
+pynuml/pynuml/process/hitgraph_original.py
+pynuml/pynuml/process/hitgraph_v1.py
+pynuml/pynuml/process/hitgraph_v2.py
+pynuml/pynuml/process/hitgraph_July3.py
+
+# Scratch notebooks and temporary notebook helpers
+notebooks/Untitled.ipynb
+notebooks/file.txt
+notebooks/h5prepare.py
+notebooks/test_h5.py
+notebooks/prepare_h5_for_nugraph_June9.py
+notebooks/check_file_before_graph.ipynb
+notebooks/check_merged1_graph_h5.ipynb
+notebooks/quick_h5_visualization_after_add_key.ipynb
+
+# Scratch text outputs
+scripts/large_evt_files.txt
+scripts/tpc_only_chpoint.txt
+scripts/train_options.txt
+
+# Scratch / analysis notebooks
+notebooks/Features_64_PDS_TPC.ipynb
+notebooks/Original_July22.ipynb
+notebooks/TPC_plus_PDS_45epoch_64batch.ipynb
+notebooks/comparison_histograms.ipynb
+notebooks/final_plots_notebook_tpc_pds.ipynb
+notebooks/final_plots_notebook_tpconly.ipynb
+notebooks/nugraph_training_visualization-tpc_pds.ipynb
+notebooks/nugraph_training_visualization.ipynb
+
+# Diagnostic / one-off helper scripts
+scripts/check_active_decoders.py
+scripts/check_large_graph_samples.py
+scripts/check_optical_edges.py
+scripts/checkfile.py
+scripts/fix_hitgraph_knn.py
+scripts/inspect_evt_outputs.py
+scripts/make_escc_report.py
+scripts/plot_escc_confusion.py
+scripts/plot_escc_confusion_fixed.py
+scripts/stress_check_optical_edges.py
+scripts/process_original.py

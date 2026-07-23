@@ -1,0 +1,5 @@
+(nugraph-gpu) [apaudel@jupyter-apaudel scripts]$ ls -lh /home/apaudel/NuGraph/logs/merged_large_tpc_20e/version_*/checkpoints/
+total 1.3M
+-rw-r--r--. 1 apaudel dune 1.3M Jun 24 14:13 'epoch=19-step=21420.ckpt'
+(nugraph-gpu) [apaudel@jupyter-apaudel scripts]$ find /home/apaudel/NuGraph/logs/merged_large_tpc_20e -name "*.ckpt"
+/home/apaudel/NuGraph/logs/merged_large_tpc_20e/version_0/checkpoints/epoch=19-step=21420.ckpt
