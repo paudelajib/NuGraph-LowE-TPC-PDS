@@ -514,6 +514,22 @@ class HitGraphProducer(ProcessorBase):
                     dtype=torch.long,
                 )
 
+            # pmt to pmt edges
+            n_pmt = data["pmt"].pos.size(0)
+            if n_pmt > 1:
+                distances = torch.cdist(data["pmt"].pos, data["pmt"].pos, p=2)
+                distances.fill_diagonal_(float("inf"))
+                knn = min(3, n_pmt - 1)
+                _, neighbor_idx = torch.topk(distances, knn, largest=False, dim=1)
+                source = torch.arange(n_pmt, dtype=torch.long).repeat_interleave(knn)
+                target = neighbor_idx.flatten()
+                edge4 = torch.stack((source, target), dim=0)
+                edge4 = torch.cat((edge4, edge4.flip(0)), dim=1)
+            else:
+                edge4 = torch.empty((2, 0), dtype=torch.long)
+
+            data["pmt", "knn", "pmt"].edge_index = edge4
+
             # pmt to flash edges
             # Also use LOCAL pmt and flash node indices.
             flash_id_to_local = {

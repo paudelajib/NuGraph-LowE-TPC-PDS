@@ -39,6 +39,9 @@ class NuGraphOptical(torch.nn.Module):
                 self.flash_to_pmt = NuGraphBlock(flash_features, pmt_features, pmt_features)
                 self.pmt_to_ophit = NuGraphBlock(pmt_features, ophit_features, ophit_features)
 
+                # message-passing between PMT nodes
+                self.pmt_to_pmt = NuGraphBlock(pmt_features, pmt_features, pmt_features)
+
                 # message-passing between nexus nodes and PMT nodes (opflashsumpe)
                 self.nexus_to_pmt = NuGraphBlock(nexus_features, pmt_features, pmt_features)
                 self.pmt_to_nexus = NuGraphBlock(pmt_features, nexus_features, nexus_features)
@@ -72,6 +75,14 @@ class NuGraphOptical(torch.nn.Module):
                 data["pmt"].x = self.checkpoint(
                         self.nexus_to_pmt, (data["sp"].x, data["pmt"].x),
                         data["sp", "knn", "pmt"].edge_index)
+
+                # message-passing from PMTs to PMTs
+                pmt_edges = data["pmt", "knn", "pmt"]
+                if "edge_index" in pmt_edges and pmt_edges.edge_index.numel() > 0:
+                        data["pmt"].x = self.checkpoint(
+                                self.pmt_to_pmt,
+                                (data["pmt"].x, data["pmt"].x),
+                                pmt_edges.edge_index)
 
                 # message-passing from pmt to flash
                 data["flash"].x = self.checkpoint(
