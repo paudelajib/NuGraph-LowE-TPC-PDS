@@ -34,7 +34,29 @@ def test(args):
     nudata.setup("test")
 
     print("using checkpoint =", args.checkpoint)
-    model = Model.load_from_checkpoint(args.checkpoint, map_location="cpu")
+    # Backward-compatible checkpoint loading:
+    # - Old TPC/PDS checkpoints do not have optical_net.pmt_to_pmt weights.
+    # - PMT-to-PMT checkpoints have optical_net.pmt_to_pmt weights.
+    # - Some intermediate checkpoints may have those weights but no use_pmt_pmt hyperparameter.
+    ckpt_for_load = torch.load(args.checkpoint, map_location="cpu", weights_only=False)
+    state_dict = ckpt_for_load.get("state_dict", {})
+    hparams = ckpt_for_load.get("hyper_parameters", {})
+
+    load_kwargs = {}
+    has_pmt_pmt_weights = any(
+        key.startswith("optical_net.pmt_to_pmt.")
+        for key in state_dict
+    )
+
+    if has_pmt_pmt_weights and not hparams.get("use_pmt_pmt", False):
+        load_kwargs["use_pmt_pmt"] = True
+        print("checkpoint contains PMT-to-PMT weights; loading with use_pmt_pmt=True")
+
+    model = Model.load_from_checkpoint(
+        args.checkpoint,
+        map_location="cpu",
+        **load_kwargs,
+    )
     model.eval()
 
     print("output file =", args.outfile)

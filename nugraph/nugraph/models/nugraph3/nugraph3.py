@@ -72,6 +72,8 @@ class NuGraph3(LightningModule):
                  instance_head: bool = False,
                  spacepoint_head: bool = False,
                  use_optical: bool = False,
+                  use_optical_only: bool = False,
+                  use_pmt_pmt: bool = False,
                  use_checkpointing: bool = False,
                  lr: float = 0.001):
         super().__init__()
@@ -87,23 +89,26 @@ class NuGraph3(LightningModule):
         self.event_classes = event_classes
         self.num_iters = num_iters
         self.lr = lr
+        self.use_optical_only = use_optical_only
+        self.use_optical = use_optical or use_optical_only
 
         self.encoder = Encoder(in_features, hit_features,
                                nexus_features, interaction_features,
-                               ophit_features, pmt_features, flash_features, use_optical)
+                               ophit_features, pmt_features, flash_features, self.use_optical)
 
         self.core_net = NuGraphCore(hit_features,
                                     nexus_features,
                                     interaction_features,
                                     use_checkpointing)
 
-        if use_optical:
+        if self.use_optical:
             self.optical_net = NuGraphOptical(interaction_features=interaction_features,
                                               nexus_features=nexus_features,
                                               ophit_features=ophit_features,
                                               pmt_features=pmt_features,
                                               flash_features=flash_features,
-                                              use_checkpointing=use_checkpointing)
+                                              use_checkpointing=use_checkpointing,
+                                              optical_only=use_optical_only)
 
         self.decoders = []
 
@@ -148,7 +153,8 @@ class NuGraph3(LightningModule):
         """
         self.encoder(data)
         for _ in range(self.num_iters):
-            self.core_net(data)
+            if not self.use_optical_only:
+                self.core_net(data)
             if hasattr(self, "optical_net"):
                 self.optical_net(data)
         total_loss = 0.
@@ -261,7 +267,9 @@ class NuGraph3(LightningModule):
         model.add_argument("--spacepoint", action="store_true",
                            help="Enable spacepoint prediction head")
         model.add_argument('--optical', action='store_true',
-                           help='Enable optical hierarchy')
+                           help='Enable optical hierarchy together with TPC')
+        model.add_argument('--opticalonly', action='store_true',
+                           help='Enable optical/PDS-only mode without TPC message passing')
         model.add_argument('--no-checkpointing', action='store_false',
                            dest="use_checkpointing",
                            help='Disable checkpointing during training')
@@ -300,5 +308,7 @@ class NuGraph3(LightningModule):
             instance_head=args.instance,
             spacepoint_head=args.spacepoint,
             use_optical=args.optical,
+            use_optical_only=args.opticalonly,
+            use_pmt_pmt=(args.optical or args.opticalonly),
             use_checkpointing=args.use_checkpointing,
             lr=args.learning_rate)

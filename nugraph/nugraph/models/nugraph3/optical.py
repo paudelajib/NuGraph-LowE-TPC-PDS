@@ -23,10 +23,14 @@ class NuGraphOptical(torch.nn.Module):
                      ophit_features: int,
                      pmt_features: int,
                      flash_features: int,
-                     use_checkpointing: bool = True):
+                     use_checkpointing: bool = True,
+                     optical_only: bool = False,
+                     use_pmt_pmt: bool = False):
                 super().__init__()
 
                 self.use_checkpointing = use_checkpointing
+                self.optical_only = optical_only
+                self.use_pmt_pmt = use_pmt_pmt
 
                 # hierarchical message-passing for optical system
                 self.ophit_to_pmt = NuGraphBlock(ophit_features, pmt_features, pmt_features)
@@ -40,7 +44,8 @@ class NuGraphOptical(torch.nn.Module):
                 self.pmt_to_ophit = NuGraphBlock(pmt_features, ophit_features, ophit_features)
 
                 # message-passing between PMT nodes
-                self.pmt_to_pmt = NuGraphBlock(pmt_features, pmt_features, pmt_features)
+                if self.use_pmt_pmt:
+                        self.pmt_to_pmt = NuGraphBlock(pmt_features, pmt_features, pmt_features)
 
                 # message-passing between nexus nodes and PMT nodes (opflashsumpe)
                 self.nexus_to_pmt = NuGraphBlock(nexus_features, pmt_features, pmt_features)
@@ -72,13 +77,26 @@ class NuGraphOptical(torch.nn.Module):
                         data["ophit", "in", "pmt"].edge_index)
 
                 # message-passing from space points to PMTs
-                data["pmt"].x = self.checkpoint(
-                        self.nexus_to_pmt, (data["sp"].x, data["pmt"].x),
-                        data["sp", "knn", "pmt"].edge_index)
+                # Skip this in optical-only mode so TPC/spacepoint information
+                # does not enter the PDS branch.
+                if not self.optical_only:
+                        data["pmt"].x = self.checkpoint(
+                                self.nexus_to_pmt, (data["sp"].x, data["pmt"].x),
+                                data["sp", "knn", "pmt"].edge_index)
 
                 # message-passing from PMTs to PMTs
-                pmt_edges = data["pmt", "knn", "pmt"]
-                if "edge_index" in pmt_edges and pmt_edges.edge_index.numel() > 0:
+                if self.use_pmt_pmt:
+                        edge_type = ("pmt", "knn", "pmt")
+                        if edge_type not in data.edge_types:
+                                raise RuntimeError(
+                                        "use_pmt_pmt=True, but graph does not contain "
+                                        "('pmt', 'knn', 'pmt') edges. Reprocess with PMT-to-PMT edges."
+                                )
+                        pmt_edges = data[edge_type]
+                        if pmt_edges.edge_index.numel() == 0:
+                                raise RuntimeError(
+                                        "use_pmt_pmt=True, but ('pmt', 'knn', 'pmt') edge_index is empty."
+                                )
                         data["pmt"].x = self.checkpoint(
                                 self.pmt_to_pmt,
                                 (data["pmt"].x, data["pmt"].x),
@@ -105,9 +123,11 @@ class NuGraphOptical(torch.nn.Module):
                         data["pmt", "in", "flash"].edge_index[(1,0), :])
 
                 # message-passing from PMTs to space points
-                data["sp"].x = self.checkpoint(
-                        self.pmt_to_nexus, (data["pmt"].x, data["sp"].x),
-                        data["sp", "knn", "pmt"].edge_index[(1,0), :])
+                # Skip this in optical-only mode so PDS does not update TPC/spacepoint nodes.
+                if not self.optical_only:
+                        data["sp"].x = self.checkpoint(
+                                self.pmt_to_nexus, (data["pmt"].x, data["sp"].x),
+                                data["sp", "knn", "pmt"].edge_index[(1,0), :])
 
                 # message-passing from pmt to ophit
                 data["ophit"].x = self.checkpoint(
