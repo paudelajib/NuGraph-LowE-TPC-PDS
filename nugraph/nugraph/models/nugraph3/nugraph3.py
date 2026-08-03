@@ -13,7 +13,7 @@ from .transform import Transform
 from .encoder import Encoder
 from .core import NuGraphCore
 from .optical import NuGraphOptical
-from .decoders import (SemanticDecoder, FilterDecoder, EventDecoder, VertexDecoder, InstanceDecoder,
+from .decoders import (SemanticDecoder, FilterDecoder, EventDecoder, VertexDecoder, DirectionDecoder, InstanceDecoder,
                        SpacepointDecoder)
 
 from ...data import H5DataModule
@@ -69,6 +69,7 @@ class NuGraph3(LightningModule):
                  semantic_head: bool = True,
                  filter_head: bool = True,
                  vertex_head: bool = False,
+                 direction_head: bool = False,
                  instance_head: bool = False,
                  spacepoint_head: bool = False,
                  use_optical: bool = False,
@@ -127,6 +128,10 @@ class NuGraph3(LightningModule):
         if vertex_head:
             self.vertex_decoder = VertexDecoder(interaction_features)
             self.decoders.append(self.vertex_decoder)
+
+        if direction_head:
+            self.direction_decoder = DirectionDecoder(interaction_features)
+            self.decoders.append(self.direction_decoder)    
 
         if instance_head:
             self.instance_decoder = InstanceDecoder(hit_features, instance_features)
@@ -268,6 +273,8 @@ class NuGraph3(LightningModule):
                            help="Enable spacepoint prediction head")
         model.add_argument('--optical', action='store_true',
                            help='Enable optical hierarchy together with TPC')
+        model.add_argument('--direction', action='store_true',
+                           help='Enable outgoing lepton direction regression head')
         model.add_argument('--opticalonly', action='store_true',
                            help='Enable optical/PDS-only mode without TPC message passing')
         model.add_argument('--no-checkpointing', action='store_false',
@@ -305,6 +312,7 @@ class NuGraph3(LightningModule):
             semantic_head=args.semantic,
             filter_head=args.filter,
             vertex_head=args.vertex,
+            direction_head=args.direction,
             instance_head=args.instance,
             spacepoint_head=args.spacepoint,
             use_optical=args.optical,

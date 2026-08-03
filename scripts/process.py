@@ -72,6 +72,7 @@ def process(args):
         semantic_labeller=semantic_labeller,
         event_labeller=event_labeller,
         label_vertex=True,
+        label_direction=True,
         label_position=False,
 
         # Keep this true for now because your graph should include PDS.

@@ -3,7 +3,7 @@ from typing import Any, Callable
 import torch
 import torch_geometric as pyg
 import pandas as pd
-
+import numpy as np
 from ..data import NuGraphData
 from .base import ProcessorBase
 
@@ -43,6 +43,7 @@ class HitGraphProducer(ProcessorBase):
                  semantic_labeller: Callable = None,
                  event_labeller: Callable = None,
                  label_vertex: bool = False,
+                 label_direction: bool = False,
                  label_position: bool = False,
                  optical: bool = False,
                  planes: list[str] = ['u','v','y'],
@@ -53,6 +54,7 @@ class HitGraphProducer(ProcessorBase):
         self.semantic_labeller = semantic_labeller
         self.event_labeller = event_labeller
         self.label_vertex = label_vertex
+        self.label_direction = label_direction
         self.label_position = label_position
         self.optical = optical
         self.planes = planes
@@ -100,6 +102,18 @@ class HitGraphProducer(ProcessorBase):
             groups['edep_table'] = []
         if self.event_labeller:
             groups['event_table'] = ['is_cc', 'is_es', 'nu_pdg']
+        if self.label_direction:
+            keys = [
+                'lep_dir_x',
+                'lep_dir_y',
+                'lep_dir_z',
+                'lep_dir_source',
+            ]
+
+            if 'event_table' in groups:
+                _unique_extend(groups['event_table'], keys)
+            else:
+                groups['event_table'] = keys    
         if self.label_vertex:
             if self.vertex_source == "event_table":
                 # Only nu_vtx_corr is used below.  Do not require
@@ -602,7 +616,7 @@ class HitGraphProducer(ProcessorBase):
 
                 primary = particles_for_vtx[particles_for_vtx['parent_id'] == 0]
                 if primary.empty:
-                    # Fallback: take the first particle if parent_id==0 is absent.
+                    # Fallback: take the first particle if parent_id==0 is abset.
                     primary = particles_for_vtx.iloc[[0]]
 
                 vtx_3d = [primary.iloc[0][start_cols].astype(float).values.tolist()]
@@ -610,5 +624,43 @@ class HitGraphProducer(ProcessorBase):
                 raise RuntimeError(f"Unknown vertex_source: {self.vertex_source}")
 
             data['evt'].y_vtx = torch.tensor(vtx_3d).float()
+        # lepton direction truth
+        if self.label_direction:
+            needed = [
+                'lep_dir_x',
+                'lep_dir_y',
+                'lep_dir_z',
+                'lep_dir_source',
+            ]
+
+            for col in needed:
+                if col not in event:
+                    raise KeyError(
+                        f"Missing event_table column {col}. "
+                        "Use merged_large_with_lepdir.evt.h5 as input."
+                    )
+
+            lep_dir_source = int(event['lep_dir_source'])
+
+            uvec = np.asarray(
+                [
+                    event['lep_dir_x'],
+                    event['lep_dir_y'],
+                    event['lep_dir_z'],
+                ],
+                dtype=np.float32,
+            )
+
+            if lep_dir_source <= 0 or not np.all(np.isfinite(uvec)):
+                return evt.name, None
+
+            norm = np.linalg.norm(uvec)
+
+            if norm <= 0 or not np.isfinite(norm):
+                return evt.name, None
+
+            uvec = uvec / norm
+
+            data['evt'].y_dir = torch.tensor(uvec).float().reshape(1, 3)
 
         return evt.name, data
