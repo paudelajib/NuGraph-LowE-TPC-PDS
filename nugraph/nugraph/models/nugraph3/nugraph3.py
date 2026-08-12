@@ -7,6 +7,7 @@ from torch.optim import AdamW
 from torch.optim.lr_scheduler import OneCycleLR
 
 from pytorch_lightning import LightningModule
+from torch_geometric.transforms import Compose
 
 from .types import Data
 from .transform import Transform
@@ -17,6 +18,7 @@ from .decoders import (SemanticDecoder, FilterDecoder, EventDecoder, VertexDecod
                        SpacepointDecoder)
 
 from ...data import H5DataModule
+from ...util import NexusFeatures
 
 if torch.cuda.is_available():
     try:
@@ -61,6 +63,7 @@ class NuGraph3(LightningModule):
                  ophit_features: int = 128,
                  pmt_features: int = 64,
                  flash_features: int = 32,
+                 sp_features: int = 0,
                  planes: tuple[str] = ("u","v","y"),
                  semantic_classes: tuple[str] = ('MIP','HIP','shower','michel','diffuse'),
                  event_classes: tuple[str] = ('numu','nue','nc'),
@@ -95,7 +98,8 @@ class NuGraph3(LightningModule):
 
         self.encoder = Encoder(in_features, hit_features,
                                nexus_features, interaction_features,
-                               ophit_features, pmt_features, flash_features, self.use_optical)
+                               ophit_features, pmt_features, flash_features, self.use_optical,
+                               sp_features=sp_features)
 
         self.core_net = NuGraphCore(hit_features,
                                     nexus_features,
@@ -223,13 +227,17 @@ class NuGraph3(LightningModule):
         return [optimizer], {'scheduler': onecycle, 'interval': 'step'}
 
     @staticmethod
-    def transform(planes: tuple[str]) -> Transform:
+    def transform(planes: tuple[str], featext3d: bool = False):
         """
-        Return data transform for NuGraph3 model
-        
+        Return data transform for NuGraph3 model.
+
         Args:
             planes: tuple of detector plane names
+            featext3d: if True, compute spacepoint/nexus input features
+                [delta_T, chi2, x, y, z] before the standard NuGraph transform.
         """
+        if featext3d:
+            return Compose([NexusFeatures(planes), Transform(planes)])
         return Transform(planes)
 
     @staticmethod
@@ -245,6 +253,10 @@ class NuGraph3(LightningModule):
                            help='Number of message-passing iterations')
         model.add_argument('--in-feats', type=int, default=5,
                            help='Number of input node features')
+        model.add_argument('--in-sp-feats', type=int, default=5,
+                           help='Number of spacepoint/nexus input features used with --3dfeatext')
+        model.add_argument('--3dfeatext', action='store_true', dest='featext3d',
+                           help='Enable 3D spacepoint/nexus input features [delta_T, chi2, x, y, z]')
         model.add_argument('--hit-feats', type=int, default=128,
                            help='Hidden dimensionality of hit convolutions')
         model.add_argument('--nexus-feats', type=int, default=32,
@@ -304,6 +316,7 @@ class NuGraph3(LightningModule):
             ophit_features=args.ophit_features,
             pmt_features=args.pmt_features,
             flash_features=args.flash_features,
+            sp_features=args.in_sp_feats if args.featext3d else 0,
             planes=nudata.planes,
             semantic_classes=nudata.semantic_classes,
             event_classes=nudata.event_classes,

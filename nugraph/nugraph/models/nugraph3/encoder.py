@@ -21,12 +21,24 @@ class Encoder(torch.nn.Module):
                  ophit_features: int,
                  pmt_features: int,
                  flash_features: int,
-                 use_optical: bool):
+                 use_optical: bool,
+                 sp_features: int = 0):
         super().__init__()
         self.input_norm = InputNorm(in_features)
         self.planar_net = torch.nn.Linear(in_features, planar_features)
         self.nexus_features = nexus_features
         self.interaction_features = interaction_features
+
+        # optional spacepoint/nexus input encoder
+        # used when --3dfeatext provides [delta_T, chi2, x, y, z] as data["sp"].x
+        if sp_features > 0:
+            self.sp_input_norm = InputNorm(sp_features)
+            self.sp_net = torch.nn.Sequential(
+                torch.nn.Linear(sp_features, nexus_features),
+                torch.nn.Mish())
+        else:
+            self.sp_input_norm = None
+            self.sp_net = None
 
         # hardcode optical features pending redesign
         if use_optical:
@@ -43,10 +55,13 @@ class Encoder(torch.nn.Module):
         """
         data["hit"].x = self.input_norm(data["hit"].x)
         data["hit"].x = self.planar_net(data["hit"].x)
-        #do we want to add back the space point position?
-        data["sp"].x = torch.zeros(data["sp"].num_nodes,
-                                   self.nexus_features,
-                                   device=data["hit"].x.device)
+        if self.sp_net is not None:
+            # Encode real spacepoint/nexus input features as the initial sp embedding.
+            data["sp"].x = self.sp_net(self.sp_input_norm(data["sp"].x))
+        else:
+            data["sp"].x = torch.zeros(data["sp"].num_nodes,
+                                       self.nexus_features,
+                                       device=data["hit"].x.device)
         data["evt"].x = torch.zeros(data["evt"].num_nodes,
                                     self.interaction_features,
                                     device=data["hit"].x.device)
