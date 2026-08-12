@@ -103,17 +103,13 @@ class HitGraphProducer(ProcessorBase):
         if self.event_labeller:
             groups['event_table'] = ['is_cc', 'is_es', 'nu_pdg']
         if self.label_direction:
-            keys = [
-                'lep_dir_x',
-                'lep_dir_y',
-                'lep_dir_z',
-                'lep_dir_source',
-            ]
+            keys = ["lep_dir"]
 
             if 'event_table' in groups:
                 _unique_extend(groups['event_table'], keys)
             else:
-                groups['event_table'] = keys    
+                groups['event_table'] = keys
+
         if self.label_vertex:
             if self.vertex_source == "event_table":
                 # Only nu_vtx_corr is used below.  Do not require
@@ -626,32 +622,38 @@ class HitGraphProducer(ProcessorBase):
             data['evt'].y_vtx = torch.tensor(vtx_3d).float()
         # lepton direction truth
         if self.label_direction:
-            needed = [
-                'lep_dir_x',
-                'lep_dir_y',
-                'lep_dir_z',
-                'lep_dir_source',
-            ]
+            # New robust truth format:
+            #   /event_table/lep_dir with shape (N, 3)
+            #
+            # Depending on HDF5 -> pandas expansion, this may appear in the
+            # event row as lep_dir itself, lep_dir_x/y/z, or lep_dir_0/1/2.
+            if "lep_dir" in event:
+                uvec = np.asarray(event["lep_dir"], dtype=np.float32).reshape(-1)
 
-            for col in needed:
-                if col not in event:
-                    raise KeyError(
-                        f"Missing event_table column {col}. "
-                        "Use merged_large_with_lepdir.evt.h5 as input."
-                    )
+            elif all(col in event for col in ["lep_dir_x", "lep_dir_y", "lep_dir_z"]):
+                uvec = np.asarray(
+                    [event["lep_dir_x"], event["lep_dir_y"], event["lep_dir_z"]],
+                    dtype=np.float32,
+                )
 
-            lep_dir_source = int(event['lep_dir_source'])
+            elif all(col in event for col in ["lep_dir_0", "lep_dir_1", "lep_dir_2"]):
+                uvec = np.asarray(
+                    [event["lep_dir_0"], event["lep_dir_1"], event["lep_dir_2"]],
+                    dtype=np.float32,
+                )
 
-            uvec = np.asarray(
-                [
-                    event['lep_dir_x'],
-                    event['lep_dir_y'],
-                    event['lep_dir_z'],
-                ],
-                dtype=np.float32,
-            )
+            else:
+                raise KeyError(
+                    "label_direction=True requires /event_table/lep_dir. "
+                    "Could not find lep_dir after loading the event row."
+                )
 
-            if lep_dir_source <= 0 or not np.all(np.isfinite(uvec)):
+            if uvec.size < 3:
+                return evt.name, None
+
+            uvec = uvec[:3]
+
+            if not np.all(np.isfinite(uvec)):
                 return evt.name, None
 
             norm = np.linalg.norm(uvec)
@@ -661,6 +663,6 @@ class HitGraphProducer(ProcessorBase):
 
             uvec = uvec / norm
 
-            data['evt'].y_dir = torch.tensor(uvec).float().reshape(1, 3)
+            data["evt"].y_dir = torch.tensor(uvec).float().reshape(1, 3)
 
         return evt.name, data

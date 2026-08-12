@@ -44,7 +44,7 @@ class DirectionDecoder(nn.Module):
     Then it will use evt.v from the vertex decoder.
     """
 
-    USE_TRUE_VERTEX_REFERENCE = True
+    USE_TRUE_VERTEX_REFERENCE = False
 
     def __init__(self, interaction_features: int):
         super().__init__()
