@@ -18,7 +18,7 @@ from .decoders import (SemanticDecoder, FilterDecoder, EventDecoder, VertexDecod
                        SpacepointDecoder)
 
 from ...data import H5DataModule
-from ...util import NexusFeatures
+from ...util import NexusFeatures, SpacePointGraph
 
 if torch.cuda.is_available():
     try:
@@ -79,7 +79,9 @@ class NuGraph3(LightningModule):
                   use_optical_only: bool = False,
                   use_pmt_pmt: bool = False,
                  use_checkpointing: bool = False,
-                 lr: float = 0.001):
+                 lr: float = 0.001,
+                 mess3d: bool = False,
+                 nexus_k: int = 8):
         super().__init__()
 
         warnings.filterwarnings("ignore", ".*NaN values found in confusion matrix.*")
@@ -93,6 +95,8 @@ class NuGraph3(LightningModule):
         self.event_classes = event_classes
         self.num_iters = num_iters
         self.lr = lr
+        self.mess3d = mess3d
+        self.nexus_k = nexus_k
         self.use_optical_only = use_optical_only
         self.use_optical = use_optical or use_optical_only
 
@@ -102,9 +106,10 @@ class NuGraph3(LightningModule):
                                sp_features=sp_features)
 
         self.core_net = NuGraphCore(hit_features,
-                                    nexus_features,
-                                    interaction_features,
-                                    use_checkpointing)
+                                     nexus_features,
+                                     interaction_features,
+                                     use_checkpointing=use_checkpointing,
+                                     mess3d=mess3d)
 
         if self.use_optical:
             self.optical_net = NuGraphOptical(interaction_features=interaction_features,
@@ -227,7 +232,10 @@ class NuGraph3(LightningModule):
         return [optimizer], {'scheduler': onecycle, 'interval': 'step'}
 
     @staticmethod
-    def transform(planes: tuple[str], featext3d: bool = False):
+    def transform(planes: tuple[str],
+                  featext3d: bool = False,
+                  mess3d: bool = False,
+                  nexus_k: int = 8):
         """
         Return data transform for NuGraph3 model.
 
@@ -235,10 +243,16 @@ class NuGraph3(LightningModule):
             planes: tuple of detector plane names
             featext3d: if True, compute spacepoint/nexus input features
                 [delta_T, chi2, x, y, z] before the standard NuGraph transform.
+            mess3d: if True, build 3D kNN sp -> sp graph using SpacePointGraph.
+            nexus_k: number of nearest neighbours for the 3D spacepoint graph.
         """
+        transforms = []
         if featext3d:
-            return Compose([NexusFeatures(planes), Transform(planes)])
-        return Transform(planes)
+            transforms.append(NexusFeatures(planes))
+        transforms.append(Transform(planes))
+        if mess3d:
+            transforms.append(SpacePointGraph(nexus_k))
+        return Compose(transforms)
 
     @staticmethod
     def add_model_args(parser: argparse.ArgumentParser) -> argparse.ArgumentParser:
@@ -257,6 +271,10 @@ class NuGraph3(LightningModule):
                            help='Number of spacepoint/nexus input features used with --3dfeatext')
         model.add_argument('--3dfeatext', action='store_true', dest='featext3d',
                            help='Enable 3D spacepoint/nexus input features [delta_T, chi2, x, y, z]')
+        model.add_argument('--mess3d', action='store_true',
+                           help='Enable 3D sp -> sp message passing over kNN spacepoint graph')
+        model.add_argument('--nexus-k', type=int, default=8,
+                           help='Number of nearest neighbours for 3D sp -> sp graph')
         model.add_argument('--hit-feats', type=int, default=128,
                            help='Hidden dimensionality of hit convolutions')
         model.add_argument('--nexus-feats', type=int, default=32,
@@ -332,4 +350,6 @@ class NuGraph3(LightningModule):
             use_optical_only=args.opticalonly,
             use_pmt_pmt=(args.optical or args.opticalonly),
             use_checkpointing=args.use_checkpointing,
-            lr=args.learning_rate)
+        lr=args.learning_rate,
+        mess3d=args.mess3d,
+        nexus_k=args.nexus_k)

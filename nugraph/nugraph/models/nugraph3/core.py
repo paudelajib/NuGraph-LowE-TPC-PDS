@@ -90,10 +90,12 @@ class NuGraphCore(nn.Module):
                  hit_features: int,
                  nexus_features: int,
                  interaction_features: int,
-                 use_checkpointing: bool = True):
+                 use_checkpointing: bool = True,
+                 mess3d: bool = False):
         super().__init__()
 
         self.use_checkpointing = use_checkpointing
+        self.mess3d = mess3d
 
         # internal planar message-passing
         self.plane_net = NuGraphBlock(hit_features, hit_features,
@@ -102,6 +104,11 @@ class NuGraphCore(nn.Module):
         # message-passing from planar nodes to nexus nodes
         self.plane_to_nexus = NuGraphBlock(hit_features, nexus_features,
                                            nexus_features)
+
+        # optional sp -> sp message-passing over the 3D kNN spacepoint graph
+        if mess3d:
+            self.sp_to_sp = NuGraphBlock(nexus_features, nexus_features,
+                                         nexus_features)
 
         # message-passing from nexus nodes to interaction nodes
         self.nexus_to_interaction = NuGraphBlock(nexus_features,
@@ -147,6 +154,12 @@ class NuGraphCore(nn.Module):
         data["sp"].x = self.checkpoint(
             self.plane_to_nexus, (data["hit"].x, data["sp"].x),
             data["hit", "nexus", "sp"].edge_index)
+
+        # optional sp -> sp message-passing over the 3D kNN spacepoint graph
+        if self.mess3d:
+            data["sp"].x = self.checkpoint(
+                self.sp_to_sp, data["sp"].x,
+                data["sp", "sp3d", "sp"].edge_index)
 
         # message-passing from nexus to interaction
         data["evt"].x = self.checkpoint(

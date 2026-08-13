@@ -48,7 +48,9 @@ def train(args):
     nudata = Data(args.data_path, batch_size=args.batch_size,
                   model=Model, shuffle=args.shuffle,
                   balance_frac=args.balance_frac, num_workers=args.num_workers,
-                  featext3d=args.featext3d)
+                  featext3d=args.featext3d,
+        mess3d=args.mess3d,
+        nexus_k=args.nexus_k)
 
     if args.resume:
         model = Model.load_from_checkpoint(args.resume)
