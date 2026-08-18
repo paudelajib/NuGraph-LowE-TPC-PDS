@@ -113,7 +113,8 @@ class NuGraph3(LightningModule):
                                               pmt_features=pmt_features,
                                               flash_features=flash_features,
                                               use_checkpointing=use_checkpointing,
-                                              optical_only=use_optical_only)
+                                              optical_only=use_optical_only,
+                                              use_pmt_pmt=use_pmt_pmt)
 
         self.decoders = []
 
