@@ -177,7 +177,8 @@ class DirectionDecoder(nn.Module):
         target = F.normalize(evt.y_dir.float(), dim=-1, eps=1.0e-8)
 
         cos = (pred * target).sum(dim=-1).clamp(-1.0, 1.0)
-        loss = (1.0 - cos).mean()
+        axis_cos = cos.abs()
+        loss = (1.0 - cos.pow(2)).mean()
 
         evt.d = pred
 
@@ -190,20 +191,34 @@ class DirectionDecoder(nn.Module):
 
         if stage:
             angle_deg = torch.rad2deg(torch.acos(cos))
+            axis_angle_deg = torch.rad2deg(torch.acos(axis_cos))
             diff = pred - target
             xyz_abs = diff.abs().mean(dim=0)
+            axis_sign = torch.where(
+                cos[:, None] >= 0,
+                torch.ones_like(cos[:, None]),
+                -torch.ones_like(cos[:, None]),
+            )
+            axis_diff = pred - axis_sign * target
+            axis_xyz_abs = axis_diff.abs().mean(dim=0)
 
             # Main direction metrics
             metrics[f"direction/loss-{stage}"] = loss
             metrics[f"direction/loss-cosine-{stage}"] = loss
             metrics[f"direction/cosine-{stage}"] = cos.mean()
+            metrics[f"direction/axis-cosine-{stage}"] = axis_cos.mean()
             metrics[f"direction/angle-deg-{stage}"] = angle_deg.mean()
             metrics[f"direction/angle-deg-median-{stage}"] = angle_deg.median()
+            metrics[f"direction/axis-angle-deg-{stage}"] = axis_angle_deg.mean()
+            metrics[f"direction/axis-angle-deg-median-{stage}"] = axis_angle_deg.median()
 
             # Component diagnostics
             metrics[f"direction/ux-resolution-{stage}"] = xyz_abs[0]
             metrics[f"direction/uy-resolution-{stage}"] = xyz_abs[1]
             metrics[f"direction/uz-resolution-{stage}"] = xyz_abs[2]
+            metrics[f"direction/axis-ux-resolution-{stage}"] = axis_xyz_abs[0]
+            metrics[f"direction/axis-uy-resolution-{stage}"] = axis_xyz_abs[1]
+            metrics[f"direction/axis-uz-resolution-{stage}"] = axis_xyz_abs[2]
 
             # Attention diagnostics
             # max weight close to 1 means decoder selects one/few spacepoints.
