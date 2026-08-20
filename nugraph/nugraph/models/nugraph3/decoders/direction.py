@@ -34,17 +34,17 @@ class DirectionDecoder(nn.Module):
     Diagnostic mode:
       USE_TRUE_VERTEX_REFERENCE = True
 
-    This uses evt.y_vtx as the reference point. That is intentional for the
+    This uses evt.v_pred as the reference point. That is intentional for the
     first test. It tells us whether the direction information is present in
     the graph geometry at all.
 
     Later, after this works, switch to:
-      USE_TRUE_VERTEX_REFERENCE = False
+      USE_TRUE_VERTEX_REFERENCE = True
 
     Then it will use evt.v from the vertex decoder.
     """
 
-    USE_TRUE_VERTEX_REFERENCE = False
+    USE_TRUE_VERTEX_REFERENCE = True
 
     def __init__(self, interaction_features: int):
         super().__init__()
@@ -85,11 +85,11 @@ class DirectionDecoder(nn.Module):
         evt = data["evt"]
 
         if self.USE_TRUE_VERTEX_REFERENCE:
-            if not hasattr(evt, "y_vtx"):
+            if not hasattr(evt, "v_pred"):
                 raise RuntimeError(
-                    "USE_TRUE_VERTEX_REFERENCE=True, but evt.y_vtx is missing."
+                    "USE_TRUE_VERTEX_REFERENCE = True, but evt.v_pred is missing."
                 )
-            return evt.y_vtx
+            return evt.v_pred
 
         # Practical mode: use predicted vertex from VertexDecoder.
         # This requires running with --vertex --direction, and the vertex decoder
@@ -102,7 +102,7 @@ class DirectionDecoder(nn.Module):
 
         raise RuntimeError(
             "Predicted vertex not found. Run with --vertex, or temporarily set "
-            "USE_TRUE_VERTEX_REFERENCE=True for diagnostic mode."
+            "USE_TRUE_VERTEX_REFERENCE = True for diagnostic mode."
         )
 
     def forward(self, data: Data, stage: str = None) -> tuple[torch.Tensor, dict[str, Any]]:
