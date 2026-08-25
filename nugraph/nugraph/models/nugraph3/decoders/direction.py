@@ -1,17 +1,28 @@
 """NuGraph3 geometry-aware direction decoder.
 
-Spacepoint-attention direction decoder.
+Two modes, selected with AXIS_MODE:
 
-Instead of predicting direction from evt.x alone, this decoder builds candidate
-direction vectors from spacepoint positions relative to the vertex:
+"weighted_pca" (default, vertex-independent):
+    The axis-only loss (1 - cos^2) is sign-symmetric, so no vertex is needed
+    to define the axis. Candidate geometry is built around the attention-
+    weighted spacepoint centroid instead of the vertex:
 
-    u_i = normalize(sp_pos_i - vertex)
+        c      = sum_i w_i sp_pos_i          (weighted centroid)
+        u_i    = normalize(sp_pos_i - c)
+        M      = sum_i w_i u_i u_i^T         (weighted orientation tensor)
+        loss   = 1 - t^T M t                 (t = true axis; trace(M) = 1)
 
-Then it learns attention weights over spacepoints and predicts
+    The predicted axis is the principal eigenvector of M. The predicted
+    vertex (evt.v_pred, if present) enters only as a soft attention feature
+    and to resolve the axis sign — it never anchors the geometry, so a few-cm
+    vertex error cannot corrupt the axis estimate.
 
-    u_pred = normalize(sum_i w_i u_i)
-
-This tests whether geometry in the graph can predict the G4 lepton direction.
+"vertex_rays" (previous behavior):
+    Candidate directions are rays from a vertex reference to each
+    spacepoint, u_i = normalize(sp_pos_i - vertex), combined with learned
+    attention weights. Accurate with the true vertex, but degrades badly
+    when the vertex error is comparable to the vertex-to-spacepoint
+    distance (~11 cm in this sample vs ~5.5 cm median v_pred error).
 """
 
 from typing import Any
@@ -31,20 +42,22 @@ class DirectionDecoder(nn.Module):
     """
     Geometry-aware event-level direction decoder.
 
-    Diagnostic mode:
-      USE_TRUE_VERTEX_REFERENCE = True
+    AXIS_MODE:
+      "weighted_pca"  vertex-independent weighted orientation tensor (default)
+      "vertex_rays"   previous vertex-anchored attention decoder
 
-    This uses evt.v_pred as the reference point. That is intentional for the
-    first test. It tells us whether the direction information is present in
-    the graph geometry at all.
+    USE_TRUE_VERTEX_REFERENCE only affects "vertex_rays" mode:
+      True  -> anchor rays at evt.y_vtx (diagnostic ceiling)
+      False -> anchor rays at evt.v_pred / evt.v
 
-    Later, after this works, switch to:
-      USE_TRUE_VERTEX_REFERENCE = True
-
-    Then it will use evt.v from the vertex decoder.
+    USE_VPRED_FEATURES only affects "weighted_pca" mode: when evt.v_pred is
+    present, the unit vector and log distance from v_pred to each spacepoint
+    are appended to the attention features as a soft prior.
     """
 
+    AXIS_MODE = "weighted_pca"
     USE_TRUE_VERTEX_REFERENCE = True
+    USE_VPRED_FEATURES = True
 
     def __init__(self, interaction_features: int):
         super().__init__()
@@ -55,8 +68,10 @@ class DirectionDecoder(nn.Module):
         # Input will be:
         #   normalized sp.x
         #   normalized evt.x for the parent event
-        #   unit vector from vertex to sp: ux, uy, uz
-        #   log distance from vertex to sp
+        #   unit vector from reference point to sp: ux, uy, uz
+        #   log distance from reference point to sp
+        #   (weighted_pca + USE_VPRED_FEATURES: also unit vector and log
+        #    distance from evt.v_pred to sp)
         self.score_net = nn.Sequential(
             nn.LazyLinear(64),
             nn.SiLU(),
@@ -81,7 +96,7 @@ class DirectionDecoder(nn.Module):
         raise RuntimeError(f"Could not find batch or ptr for node type {node}")
 
     def _get_vertex_reference(self, data: Data) -> torch.Tensor:
-        """Return vertex reference for each event."""
+        """Return vertex reference for each event (vertex_rays mode)."""
         evt = data["evt"]
 
         if self.USE_TRUE_VERTEX_REFERENCE:
@@ -91,9 +106,9 @@ class DirectionDecoder(nn.Module):
                 )
             return evt.y_vtx
 
-        # Practical mode: use predicted vertex from VertexDecoder.
-        # This requires running with --vertex --direction, and the vertex decoder
-        # must run before the direction decoder.
+        if hasattr(evt, "v_pred"):
+            return evt.v_pred
+
         if hasattr(evt, "v"):
             return evt.v.detach()
 
@@ -101,9 +116,23 @@ class DirectionDecoder(nn.Module):
             return evt.vertex.detach()
 
         raise RuntimeError(
-            "Predicted vertex not found. Run with --vertex, or temporarily set "
-            "USE_TRUE_VERTEX_REFERENCE = True for diagnostic mode."
+            "Predicted vertex not found. Run with --vertex, provide evt.v_pred, "
+            "or temporarily set USE_TRUE_VERTEX_REFERENCE = True."
         )
+
+    def _get_sign_reference(self, evt) -> torch.Tensor | None:
+        """Reference point used only to orient the axis (weighted_pca mode).
+
+        Prefer the predicted vertex so deployment never needs truth; fall
+        back to the true vertex for truth-only samples.
+        """
+        if hasattr(evt, "v_pred"):
+            return evt.v_pred.float()
+        if hasattr(evt, "v"):
+            return evt.v.detach().float()
+        if hasattr(evt, "y_vtx"):
+            return evt.y_vtx.float()
+        return None
 
     def forward(self, data: Data, stage: str = None) -> tuple[torch.Tensor, dict[str, Any]]:
         evt = data["evt"]
@@ -127,58 +156,113 @@ class DirectionDecoder(nn.Module):
         sp_pos = sp.pos[:, :3].float()
         sp_x = sp.x.float()
 
-        vertex = self._get_vertex_reference(data).float()
-
-        # ------------------------------------------------------------
-        # Geometry: vector from vertex to each spacepoint
-        # ------------------------------------------------------------
-        rel = sp_pos - vertex[sp_batch]
-        dist = rel.norm(dim=-1, keepdim=True).clamp_min(1.0e-6)
-        rel_hat = rel / dist
-
-        # ------------------------------------------------------------
-        # Features for attention score
-        # ------------------------------------------------------------
         sp_x_norm = F.layer_norm(sp_x, (sp_x.shape[-1],))
         evt_x_norm = self.evt_norm(evt.x.float())
 
-        # log distance is safer than raw distance because detector coordinates
-        # may be large.
-        log_dist = torch.log1p(dist)
-
-        score_input = torch.cat(
-            [
-                sp_x_norm,
-                evt_x_norm[sp_batch],
-                rel_hat,
-                log_dist,
-            ],
-            dim=-1,
-        )
-
-        score = self.score_net(score_input).squeeze(-1)
-
-        # Softmax separately within each event.
-        weight = softmax(score, sp_batch)
-
-        # Weighted sum of candidate directions.
-        weighted_vec = weight.unsqueeze(-1) * rel_hat
-
-        pred = torch.zeros(
-            n_evt,
-            3,
-            device=weighted_vec.device,
-            dtype=weighted_vec.dtype,
-        )
-        pred.index_add_(0, sp_batch, weighted_vec)
-
-        pred = F.normalize(pred, dim=-1, eps=1.0e-8)
-
         target = F.normalize(evt.y_dir.float(), dim=-1, eps=1.0e-8)
+
+        if self.AXIS_MODE == "weighted_pca":
+            # --------------------------------------------------------
+            # Pass 1 geometry: uniform centroid per event
+            # --------------------------------------------------------
+            ones = torch.ones(sp_pos.shape[0], device=sp_pos.device, dtype=sp_pos.dtype)
+            cnt = torch.zeros(n_evt, device=sp_pos.device, dtype=sp_pos.dtype)
+            cnt.index_add_(0, sp_batch, ones)
+            cnt = cnt.clamp_min(1.0)
+
+            c0 = torch.zeros(n_evt, 3, device=sp_pos.device, dtype=sp_pos.dtype)
+            c0.index_add_(0, sp_batch, sp_pos)
+            c0 = c0 / cnt.unsqueeze(-1)
+
+            rel0 = sp_pos - c0[sp_batch]
+            dist = rel0.norm(dim=-1, keepdim=True).clamp_min(1.0e-6)
+            rel0_hat = rel0 / dist
+            log_dist = torch.log1p(dist)
+
+            feats = [sp_x_norm, evt_x_norm[sp_batch], rel0_hat, log_dist]
+
+            if self.USE_VPRED_FEATURES and hasattr(evt, "v_pred"):
+                relv = sp_pos - evt.v_pred.float()[sp_batch]
+                dv = relv.norm(dim=-1, keepdim=True).clamp_min(1.0e-6)
+                feats += [relv / dv, torch.log1p(dv)]
+
+            score = self.score_net(torch.cat(feats, dim=-1)).squeeze(-1)
+            weight = softmax(score, sp_batch)
+
+            # --------------------------------------------------------
+            # Pass 2 geometry: weighted centroid and orientation tensor
+            # --------------------------------------------------------
+            # sum_i w_i = 1 per event, so no division needed.
+            c = torch.zeros(n_evt, 3, device=sp_pos.device, dtype=weight.dtype)
+            c.index_add_(0, sp_batch, weight.unsqueeze(-1) * sp_pos)
+
+            rel = sp_pos - c[sp_batch]
+            d = rel.norm(dim=-1, keepdim=True).clamp_min(1.0e-6)
+            u = rel / d
+
+            outer = weight.unsqueeze(-1).unsqueeze(-1) * (
+                u.unsqueeze(-1) * u.unsqueeze(-2)
+            )
+            m = torch.zeros(n_evt, 3, 3, device=sp_pos.device, dtype=weight.dtype)
+            m.index_add_(0, sp_batch, outer)
+
+            # Rayleigh-quotient axis loss: trace(M) = 1, so
+            # t^T M t = sum_i w_i cos^2(theta_i) and loss = weighted mean sin^2.
+            # Equals 1 - cos^2 in the rank-1 limit; no eigh in the loss path.
+            rayleigh = torch.einsum("ei,eij,ej->e", target, m, target)
+            rayleigh = rayleigh.clamp(0.0, 1.0)
+            loss = (1.0 - rayleigh).mean()
+
+            # Predicted axis for outputs/metrics: principal eigenvector of M.
+            # eigh gradients are unstable near degenerate spectra, so keep it
+            # out of the loss path entirely.
+            with torch.no_grad():
+                _, evecs = torch.linalg.eigh(m)
+                pred = F.normalize(evecs[..., -1], dim=-1, eps=1.0e-8)
+
+                sign_ref = self._get_sign_reference(evt)
+                if sign_ref is not None:
+                    outward = c - sign_ref
+                    flip = (pred * outward).sum(dim=-1, keepdim=True) < 0
+                    pred = torch.where(flip, -pred, pred)
+
+            dist_metric = d
+        elif self.AXIS_MODE == "vertex_rays":
+            vertex = self._get_vertex_reference(data).float()
+
+            rel = sp_pos - vertex[sp_batch]
+            dist = rel.norm(dim=-1, keepdim=True).clamp_min(1.0e-6)
+            rel_hat = rel / dist
+            log_dist = torch.log1p(dist)
+
+            score_input = torch.cat(
+                [sp_x_norm, evt_x_norm[sp_batch], rel_hat, log_dist],
+                dim=-1,
+            )
+
+            score = self.score_net(score_input).squeeze(-1)
+            weight = softmax(score, sp_batch)
+
+            weighted_vec = weight.unsqueeze(-1) * rel_hat
+
+            pred = torch.zeros(
+                n_evt,
+                3,
+                device=weighted_vec.device,
+                dtype=weighted_vec.dtype,
+            )
+            pred.index_add_(0, sp_batch, weighted_vec)
+            pred = F.normalize(pred, dim=-1, eps=1.0e-8)
+
+            cos_loss = (pred * target).sum(dim=-1).clamp(-1.0, 1.0)
+            loss = (1.0 - cos_loss.pow(2)).mean()
+
+            dist_metric = dist
+        else:
+            raise RuntimeError(f"Unknown AXIS_MODE: {self.AXIS_MODE}")
 
         cos = (pred * target).sum(dim=-1).clamp(-1.0, 1.0)
         axis_cos = cos.abs()
-        loss = (1.0 - cos.pow(2)).mean()
 
         evt.d = pred
 
@@ -239,7 +323,7 @@ class DirectionDecoder(nn.Module):
             metrics[f"direction/attention-max-weight-{stage}"] = max_weight.mean()
 
             # Geometry diagnostics
-            metrics[f"direction/sp-dist-mean-{stage}"] = dist.mean()
+            metrics[f"direction/sp-dist-mean-{stage}"] = dist_metric.mean()
             metrics[f"direction/evtx-feature-std-{stage}"] = evt.x.std(dim=0).mean()
             metrics[f"direction/evtx-norm-{stage}"] = evt.x.norm(dim=1).mean()
 
