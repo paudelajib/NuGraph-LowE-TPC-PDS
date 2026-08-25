@@ -1,0 +1,188 @@
+
+==========================================================================================
+OLD_no_lepdir_July21
+/home/apaudel/NuGraph/scripts/merged1_July21_40k_pmtpmt
+==========================================================================================
+
+TOP-LEVEL HDF5 OBJECTS:
+  GROUP   /dataset                    n_children = 33394
+  GROUP   /datasize                   n_children = 1
+  DATASET /event_classes              shape = (2,), dtype = object
+  DATASET /gen                        shape = (1,), dtype = int64
+  DATASET /planes                     shape = (3,), dtype = object
+  GROUP   /samples                    n_children = 3
+  DATASET /semantic_classes           shape = (8,), dtype = object
+
+METADATA:
+  planes: ['u', 'v', 'y']
+  semantic_classes: ['pion', 'muon', 'kaon', 'hadron', 'shower', 'lowE_electron', 'michel', 'diffuse']
+  event_classes: ['cc_nue', 'es_nue']
+  gen: [2]
+
+COUNTS:
+  dataset N = 33394
+  samples/train      = 30056
+  samples/validation = 1669
+  samples/test       = 1669
+
+CLASS BALANCE:
+  class map: {0: 'cc_nue', 1: 'es_nue'}
+  train:
+    0 cc_nue  :  17735  frac = 0.5901
+    1 es_nue  :  12321  frac = 0.4099
+  validation:
+    0 cc_nue  :    984  frac = 0.5896
+    1 es_nue  :    685  frac = 0.4104
+  test:
+    0 cc_nue  :    946  frac = 0.5668
+    1 es_nue  :    723  frac = 0.4332
+
+FIRST SAMPLE SCHEMA:
+  first test sample: r20000257_sr257_evt12806
+  object type: <class 'h5py._hl.dataset.Dataset'>
+  shape: ()
+  dtype has fields: True
+
+ALL COMPOUND FIELDS IN ONE EVENT:
+  metadata/run                                  int32
+  metadata/subrun                               int32
+  metadata/event                                int32
+  sp/pos                                        ('<f4', (24, 3))
+  hit/plane                                     ('<i8', (69,))
+  hit/pos                                       ('<f4', (69, 2))
+  hit/x                                         ('<f4', (69, 6))
+  hit/id                                        ('<i8', (69,))
+  hit/y_semantic                                ('<i8', (69,))
+  evt/num_nodes                                 int64
+  evt/y                                         ('<i8', (1,))
+  evt/y_vtx                                     ('<f4', (1, 3))
+  particle-truth/num_nodes                      int64
+  ophit/pos                                     ('<f4', (491, 3))
+  ophit/x                                       ('<f4', (491, 9))
+  flash/pos                                     ('<f4', (1, 3))
+  flash/x                                       ('<f4', (1, 10))
+  pmt/pos                                       ('<f4', (143, 2))
+  pmt/x                                         ('<f4', (143, 4))
+  hit_delaunay_hit/edge_index                   ('<i8', (2, 382))
+  hit_delaunay-planar_hit/edge_index            ('<i8', (2, 348))
+  hit_nexus_sp/edge_index                       ('<i8', (2, 72))
+  hit_in_evt/edge_index                         ('<i8', (2, 69))
+  sp_in_evt/edge_index                          ('<i8', (2, 24))
+  hit_cluster-truth_particle-truth/edge_index   ('<i8', (2, 54))
+  ophit_in_pmt/edge_index                       ('<i8', (2, 145))
+  pmt_knn_pmt/edge_index                        ('<i8', (2, 858))
+  pmt_in_flash/edge_index                       ('<i8', (2, 143))
+  flash_in_evt/edge_index                       ('<i8', (2, 1))
+  sp_knn_pmt/edge_index                         ('<i8', (2, 240))
+
+IMPORTANT FIELD CHECKS:
+  evt/y                         : True
+  evt/y_dir                     : False
+  evt/y_vtx                     : True
+  hit/x                         : True
+  sp/pos                        : True
+  pmt_knn_pmt/edge_index        : True
+  sp_knn_pmt/edge_index         : True
+  ophit_in_pmt/edge_index       : True
+  pmt_in_flash/edge_index       : True
+  flash_in_evt/edge_index       : True
+
+==========================================================================================
+NEW_g4lepdir_Aug6
+/home/apaudel/NuGraph/scripts/merged1_Aug6_40k_pmtpmt_g4lepdir
+==========================================================================================
+
+TOP-LEVEL HDF5 OBJECTS:
+  GROUP   /dataset                    n_children = 33457
+  GROUP   /datasize                   n_children = 1
+  DATASET /event_classes              shape = (2,), dtype = object
+  DATASET /gen                        shape = (1,), dtype = int64
+  DATASET /planes                     shape = (3,), dtype = object
+  GROUP   /samples                    n_children = 3
+  DATASET /semantic_classes           shape = (8,), dtype = object
+
+METADATA:
+  planes: ['u', 'v', 'y']
+  semantic_classes: ['pion', 'muon', 'kaon', 'hadron', 'shower', 'lowE_electron', 'michel', 'diffuse']
+  event_classes: ['cc_nue', 'es_nue']
+  gen: [2]
+
+COUNTS:
+  dataset N = 33457
+  samples/train      = 30113
+  samples/validation = 1672
+  samples/test       = 1672
+
+CLASS BALANCE:
+  class map: {0: 'cc_nue', 1: 'es_nue'}
+  train:
+    0 cc_nue  :  17691  frac = 0.5875
+    1 es_nue  :  12422  frac = 0.4125
+  validation:
+    0 cc_nue  :    972  frac = 0.5813
+    1 es_nue  :    700  frac = 0.4187
+  test:
+    0 cc_nue  :    976  frac = 0.5837
+    1 es_nue  :    696  frac = 0.4163
+
+FIRST SAMPLE SCHEMA:
+  first test sample: r20000353_sr353_evt17620
+  object type: <class 'h5py._hl.dataset.Dataset'>
+  shape: ()
+  dtype has fields: True
+
+ALL COMPOUND FIELDS IN ONE EVENT:
+  metadata/run                                  int32
+  metadata/subrun                               int32
+  metadata/event                                int32
+  sp/pos                                        ('<f4', (21, 3))
+  hit/plane                                     ('<i8', (69,))
+  hit/pos                                       ('<f4', (69, 2))
+  hit/x                                         ('<f4', (69, 6))
+  hit/id                                        ('<i8', (69,))
+  hit/y_semantic                                ('<i8', (69,))
+  evt/num_nodes                                 int64
+  evt/y                                         ('<i8', (1,))
+  evt/y_vtx                                     ('<f4', (1, 3))
+  evt/y_dir                                     ('<f4', (1, 3))
+  particle-truth/num_nodes                      int64
+  ophit/pos                                     ('<f4', (638, 3))
+  ophit/x                                       ('<f4', (638, 9))
+  flash/pos                                     ('<f4', (2, 3))
+  flash/x                                       ('<f4', (2, 10))
+  pmt/pos                                       ('<f4', (156, 2))
+  pmt/x                                         ('<f4', (156, 4))
+  hit_delaunay_hit/edge_index                   ('<i8', (2, 390))
+  hit_delaunay-planar_hit/edge_index            ('<i8', (2, 356))
+  hit_nexus_sp/edge_index                       ('<i8', (2, 63))
+  hit_in_evt/edge_index                         ('<i8', (2, 69))
+  sp_in_evt/edge_index                          ('<i8', (2, 21))
+  hit_cluster-truth_particle-truth/edge_index   ('<i8', (2, 61))
+  ophit_in_pmt/edge_index                       ('<i8', (2, 160))
+  pmt_knn_pmt/edge_index                        ('<i8', (2, 936))
+  pmt_in_flash/edge_index                       ('<i8', (2, 156))
+  flash_in_evt/edge_index                       ('<i8', (2, 2))
+  sp_knn_pmt/edge_index                         ('<i8', (2, 210))
+
+IMPORTANT FIELD CHECKS:
+  evt/y                         : True
+  evt/y_dir                     : True
+  evt/y_vtx                     : True
+  hit/x                         : True
+  sp/pos                        : True
+  pmt_knn_pmt/edge_index        : True
+  sp_knn_pmt/edge_index         : True
+  ophit_in_pmt/edge_index       : True
+  pmt_in_flash/edge_index       : True
+  flash_in_evt/edge_index       : True
+
+==========================================================================================
+FIELD DIFFERENCE OLD VS NEW
+==========================================================================================
+
+Fields only in OLD:
+
+Fields only in NEW:
+  evt/y_dir
+
+Fields common to both: 30

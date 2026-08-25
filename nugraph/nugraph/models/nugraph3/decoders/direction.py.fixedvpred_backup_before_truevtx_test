@@ -85,11 +85,11 @@ class DirectionDecoder(nn.Module):
         evt = data["evt"]
 
         if self.USE_TRUE_VERTEX_REFERENCE:
-            if not hasattr(evt, "y_vtx"):
+            if not hasattr(evt, "v_pred"):
                 raise RuntimeError(
-                    "USE_TRUE_VERTEX_REFERENCE = True, but evt.y_vtx is missing."
+                    "USE_TRUE_VERTEX_REFERENCE = True, but evt.v_pred is missing."
                 )
-            return evt.y_vtx
+            return evt.v_pred
 
         # Practical mode: use predicted vertex from VertexDecoder.
         # This requires running with --vertex --direction, and the vertex decoder
