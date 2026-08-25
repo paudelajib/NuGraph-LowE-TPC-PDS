@@ -17,12 +17,21 @@ Two modes, selected with AXIS_MODE:
     and to resolve the axis sign — it never anchors the geometry, so a few-cm
     vertex error cannot corrupt the axis estimate.
 
-"vertex_rays" (previous behavior):
+"vertex_rays" (previous behavior, now with optional smearing augmentation):
     Candidate directions are rays from a vertex reference to each
     spacepoint, u_i = normalize(sp_pos_i - vertex), combined with learned
     attention weights. Accurate with the true vertex, but degrades badly
     when the vertex error is comparable to the vertex-to-spacepoint
-    distance (~11 cm in this sample vs ~5.5 cm median v_pred error).
+    distance (~11 cm in this sample vs ~5.5 cm median v_pred error):
+    trained on a fixed vertex, the attention collapses onto single
+    spacepoints and never learns noise-robust weighting.
+
+    VERTEX_SMEAR_CM > 0 fixes this by anchoring the rays during TRAINING
+    at the true vertex plus a fresh per-event isotropic Gaussian offset
+    (re-sampled every forward pass), while validation/test anchor at the
+    reference chosen by USE_TRUE_VERTEX_REFERENCE (evt.v_pred for the
+    practical setting). A per-axis sigma of 3.5 cm gives a median 3D
+    offset of ~5.4 cm, matching the observed v_pred error.
 """
 
 from typing import Any
@@ -53,11 +62,19 @@ class DirectionDecoder(nn.Module):
     USE_VPRED_FEATURES only affects "weighted_pca" mode: when evt.v_pred is
     present, the unit vector and log distance from v_pred to each spacepoint
     are appended to the attention features as a soft prior.
+
+    VERTEX_SMEAR_CM only affects "vertex_rays" mode: when > 0 and the module
+    is in training mode, rays are anchored at evt.y_vtx plus an isotropic
+    Gaussian offset with this per-axis sigma (fresh sample every forward
+    pass). Evaluation always uses the un-smeared reference, so validation
+    metrics with USE_TRUE_VERTEX_REFERENCE = False directly measure
+    deployable (v_pred-anchored) performance. Set to 0 to disable.
     """
 
-    AXIS_MODE = "weighted_pca"
-    USE_TRUE_VERTEX_REFERENCE = True
+    AXIS_MODE = "vertex_rays"
+    USE_TRUE_VERTEX_REFERENCE = False
     USE_VPRED_FEATURES = True
+    VERTEX_SMEAR_CM = 3.5
 
     def __init__(self, interaction_features: int):
         super().__init__()
@@ -228,7 +245,15 @@ class DirectionDecoder(nn.Module):
 
             dist_metric = d
         elif self.AXIS_MODE == "vertex_rays":
-            vertex = self._get_vertex_reference(data).float()
+            if self.training and self.VERTEX_SMEAR_CM > 0:
+                if not hasattr(evt, "y_vtx"):
+                    raise RuntimeError(
+                        "VERTEX_SMEAR_CM > 0 requires evt.y_vtx during training."
+                    )
+                vertex = evt.y_vtx.float()
+                vertex = vertex + self.VERTEX_SMEAR_CM * torch.randn_like(vertex)
+            else:
+                vertex = self._get_vertex_reference(data).float()
 
             rel = sp_pos - vertex[sp_batch]
             dist = rel.norm(dim=-1, keepdim=True).clamp_min(1.0e-6)
