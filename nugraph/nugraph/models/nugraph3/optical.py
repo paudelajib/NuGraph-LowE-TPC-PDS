@@ -25,12 +25,14 @@ class NuGraphOptical(torch.nn.Module):
                      flash_features: int,
                      use_checkpointing: bool = True,
                      optical_only: bool = False,
-                     use_pmt_pmt: bool = False):
+                     use_pmt_pmt: bool = False,
+                     use_ophit_ophit: bool = False):
                 super().__init__()
 
                 self.use_checkpointing = use_checkpointing
                 self.optical_only = optical_only
                 self.use_pmt_pmt = use_pmt_pmt
+                self.use_ophit_ophit = use_ophit_ophit
 
                 # hierarchical message-passing for optical system
                 self.ophit_to_pmt = NuGraphBlock(ophit_features, pmt_features, pmt_features)
@@ -46,6 +48,11 @@ class NuGraphOptical(torch.nn.Module):
                 # message-passing between PMT nodes
                 if self.use_pmt_pmt:
                         self.pmt_to_pmt = NuGraphBlock(pmt_features, pmt_features, pmt_features)
+
+                # message-passing between OpHit nodes
+                if self.use_ophit_ophit:
+                        self.ophit_to_ophit = NuGraphBlock(ophit_features, ophit_features,
+                                                           ophit_features)
 
                 # message-passing between nexus nodes and PMT nodes (opflashsumpe)
                 self.nexus_to_pmt = NuGraphBlock(nexus_features, pmt_features, pmt_features)
@@ -70,6 +77,33 @@ class NuGraphOptical(torch.nn.Module):
                 Args:
                 data: Graph data object
                 """
+
+                # message-passing between OpHits.
+                #
+                # This MUST run before ophit -> pmt. Around two thirds of
+                # OpHits have no ophit -> pmt edge, so without a prior step
+                # among OpHits themselves their features never enter the
+                # hierarchy at all. Running it first lets an unattached OpHit
+                # pass its features to a neighbour that IS attached, which then
+                # carries them up to pmt -> flash -> evt.
+                if self.use_ophit_ophit:
+                        edge_type = ("ophit", "knn", "ophit")
+                        if edge_type not in data.edge_types:
+                                raise RuntimeError(
+                                        "use_ophit_ophit=True, but graph does not contain "
+                                        "('ophit', 'knn', 'ophit') edges. Reprocess with "
+                                        "OpHit-to-OpHit edges."
+                                )
+                        ophit_edges = data[edge_type]
+                        if ophit_edges.edge_index.numel() == 0:
+                                raise RuntimeError(
+                                        "use_ophit_ophit=True, but ('ophit', 'knn', 'ophit') "
+                                        "edge_index is empty."
+                                )
+                        data["ophit"].x = self.checkpoint(
+                                self.ophit_to_ophit,
+                                (data["ophit"].x, data["ophit"].x),
+                                ophit_edges.edge_index)
 
                 # message-passing from ophit to pmt
                 data["pmt"].x = self.checkpoint(

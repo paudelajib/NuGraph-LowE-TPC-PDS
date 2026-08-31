@@ -142,6 +142,91 @@ def _opdet_pos(channels) -> torch.Tensor:
     return torch.stack([OPDET_POS_X[idx], OPDET_POS_Y[idx], OPDET_POS_Z[idx]], dim=1).float()
 
 
+# OpHit <-> OpHit edge defaults, chosen from the measured distributions:
+#   R_MAX  nearest-in-time-neighbour distance is 48.8 cm (median) and 143.9 cm
+#          (p95); 180 cm covers the tail without spanning the detector.
+#   T_WIN  the isolated OpHits are the LAr slow-scintillation tail (decay of
+#          order 2 us). A 1 us *pairwise* window chains through intermediate
+#          hits over num_iters hops, giving ~5 us of effective reach.
+#   K      at least a quarter of hits share an OpDet with an in-time neighbour,
+#          so a small k gets consumed by same-channel duplicates before
+#          reaching any spatial neighbour.
+OPHIT_KNN_RADIUS = 180.0     # cm, in the (y, z) plane
+OPHIT_KNN_TIME_WINDOW = 1.0  # us, pairwise
+OPHIT_KNN_K = 8
+
+
+def _ophit_knn_edges(pos: torch.Tensor,
+                     t: torch.Tensor,
+                     r_max: float,
+                     t_win: float,
+                     k: int,
+                     block: int = 512) -> torch.Tensor:
+    """Build symmetric OpHit <-> OpHit edges.
+
+    For each OpHit, take its k nearest neighbours in the (y, z) plane, keeping
+    only those within `r_max` cm and `t_win` us. Capping at k bounds the node
+    degree, which matters once radiological background multiplies the OpHit
+    count; the gates keep the surviving edges physically meaningful.
+
+    Sorting by time makes each hit's candidates a contiguous index range, so
+    this costs O(N * W) rather than the O(N^2) of a full pairwise distance
+    matrix (W = hits inside the time window). With t_win ~ 1 us against a
+    ~4500 us readout, W stays small even for very busy events.
+
+    Args:
+        pos: (N, 2) OpHit positions in the (y, z) plane, cm
+        t: (N,) OpHit peak times, us
+        r_max: maximum edge length, cm
+        t_win: maximum edge time difference, us
+        k: neighbours per node before symmetrising
+        block: rows per distance-matrix chunk
+
+    Returns:
+        (2, E) edge index, bidirectional. Empty (2, 0) if fewer than 2 OpHits.
+    """
+    n = pos.size(0)
+    if n < 2 or k < 1:
+        return torch.empty((2, 0), dtype=torch.long)
+
+    order = torch.argsort(t)
+    ts, ps = t[order], pos[order]
+
+    src_all, dst_all = [], []
+    for a in range(0, n, block):
+        b = min(a + block, n)
+        # candidate window: every partner of rows [a, b) within t_win lies here
+        lo = int(torch.searchsorted(ts, (ts[a] - t_win).reshape(1)).item())
+        hi = int(torch.searchsorted(ts, (ts[b - 1] + t_win).reshape(1),
+                                    right=True).item())
+
+        d = torch.cdist(ps[a:b], ps[lo:hi])
+        gate = ((ts[a:b, None] - ts[None, lo:hi]).abs() <= t_win) & (d <= r_max)
+
+        rows = torch.arange(a, b, dtype=torch.long).unsqueeze(1)
+        cols = torch.arange(lo, hi, dtype=torch.long).unsqueeze(0)
+        gate &= rows != cols                       # no self-loops
+
+        d = d.masked_fill(~gate, float("inf"))
+        kk = min(k, d.size(1))
+        if kk < 1:
+            continue
+
+        dist, idx = torch.topk(d, kk, largest=False, dim=1)
+        ok = torch.isfinite(dist)                  # drop padding past the gate
+        if not bool(ok.any()):
+            continue
+        src_all.append(rows.expand(-1, kk)[ok])
+        dst_all.append((idx + lo)[ok])
+
+    if not src_all:
+        return torch.empty((2, 0), dtype=torch.long)
+
+    # map sorted indices back onto the original OpHit ordering
+    edges = torch.stack((order[torch.cat(src_all)], order[torch.cat(dst_all)]), dim=0)
+    return torch.cat((edges, edges.flip(0)), dim=1)
+
+
 def _unique_extend(dst: list[str], src: list[str]) -> None:
     """Append keys without duplicating them."""
     for key in src:
@@ -183,7 +268,10 @@ class HitGraphProducer(ProcessorBase):
                  planes: list[str] = ['u','v','y'],
                  node_feats: list[str] = ['integral','rms','tpc'],
                  lower_bound: int = 3,
-                 store_detailed_truth: bool = False):
+                 store_detailed_truth: bool = False,
+                 ophit_knn_radius: float = OPHIT_KNN_RADIUS,
+                 ophit_knn_time_window: float = OPHIT_KNN_TIME_WINDOW,
+                 ophit_knn_k: int = OPHIT_KNN_K):
 
         self.semantic_labeller = semantic_labeller
         self.event_labeller = event_labeller
@@ -195,6 +283,11 @@ class HitGraphProducer(ProcessorBase):
         self.node_feats = node_feats
         self.lower_bound = lower_bound
         self.store_detailed_truth = store_detailed_truth
+        # exposed rather than hardcoded: these want re-tuning once radiological
+        # background is present, and that should not need a code change
+        self.ophit_knn_radius = ophit_knn_radius
+        self.ophit_knn_time_window = ophit_knn_time_window
+        self.ophit_knn_k = ophit_knn_k
 
         self.transform = pyg.transforms.Compose((
             pyg.transforms.Delaunay(),
@@ -582,6 +675,23 @@ class HitGraphProducer(ProcessorBase):
                 edge4 = torch.empty((2, 0), dtype=torch.long)
 
             data["pmt", "knn", "pmt"].edge_index = edge4
+
+            # ophit to ophit edges
+            #
+            # Without these, an OpHit whose channel carries no positive summed
+            # PE in its flash (sumpe_id == -1) has no outgoing edge at all, so
+            # its features never reach pmt -> flash -> evt. That is 66% of all
+            # OpHits, and they are not noise: they are the LAr slow-component
+            # tail of the same interaction, carrying ~35% of the event's light.
+            # These edges let them hand their features to a connected
+            # neighbour, which then carries them up the hierarchy.
+            data["ophit", "knn", "ophit"].edge_index = _ophit_knn_edges(
+                data["ophit"].pos[:, 1:3],                       # (y, z) in cm
+                torch.as_tensor(ophits["peaktime"].values).float(),
+                self.ophit_knn_radius,
+                self.ophit_knn_time_window,
+                self.ophit_knn_k,
+            )
 
             # pmt to flash edges
             # Also use LOCAL pmt and flash node indices.

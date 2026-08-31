@@ -78,6 +78,7 @@ class NuGraph3(LightningModule):
                  use_optical: bool = False,
                   use_optical_only: bool = False,
                   use_pmt_pmt: bool = False,
+                  use_ophit_ophit: bool = False,
                  use_checkpointing: bool = False,
                  lr: float = 0.001):
         super().__init__()
@@ -114,7 +115,8 @@ class NuGraph3(LightningModule):
                                               flash_features=flash_features,
                                               use_checkpointing=use_checkpointing,
                                               optical_only=use_optical_only,
-                                              use_pmt_pmt=use_pmt_pmt)
+                                              use_pmt_pmt=use_pmt_pmt,
+                                              use_ophit_ophit=use_ophit_ophit)
 
         self.decoders = []
 
@@ -290,6 +292,11 @@ class NuGraph3(LightningModule):
                            help='Enable outgoing lepton direction regression head')
         model.add_argument('--opticalonly', action='store_true',
                            help='Enable optical/PDS-only mode without TPC message passing')
+        # Opt-in rather than implied by --optical: graphs produced before the
+        # ("ophit", "knn", "ophit") edge type existed would raise immediately.
+        model.add_argument('--ophit-ophit', action='store_true',
+                           help='Enable OpHit-to-OpHit message passing. Requires a graph '
+                                'processed with ophit-to-ophit edges')
         model.add_argument('--no-checkpointing', action='store_false',
                            dest="use_checkpointing",
                            help='Disable checkpointing during training')
@@ -332,5 +339,6 @@ class NuGraph3(LightningModule):
             use_optical=args.optical,
             use_optical_only=args.opticalonly,
             use_pmt_pmt=(args.optical or args.opticalonly),
+            use_ophit_ophit=args.ophit_ophit,
             use_checkpointing=args.use_checkpointing,
             lr=args.learning_rate)
