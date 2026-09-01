@@ -41,7 +41,17 @@ class Encoder(torch.nn.Module):
             self.sp_net = None
 
         # hardcode optical features pending redesign
+        #
+        # These carry an InputNorm for the same reason the hit and spacepoint
+        # encoders do: the raw ranges are wild (ophit area spans 8 to ~540000,
+        # positions are hundreds of cm, peaktime spans +/-2245 us), and feeding
+        # that straight into a Linear leaves the optical branch badly scaled.
+        # It matters more now that ophit.x is rewritten twice per iteration -
+        # once by ophit_to_ophit and once by pmt_to_ophit.
         if use_optical:
+            self.ophit_input_norm = InputNorm(9)
+            self.pmt_input_norm = InputNorm(4)
+            self.flash_input_norm = InputNorm(10)
             self.ophit_net = torch.nn.Linear(9, ophit_features)
             self.pmt_net = torch.nn.Linear(4, pmt_features)
             self.flash_net = torch.nn.Linear(10, flash_features)
@@ -67,6 +77,6 @@ class Encoder(torch.nn.Module):
                                     device=data["hit"].x.device)
 
         if hasattr(self, "ophit_net"):
-            data["ophit"].x = self.ophit_net(data["ophit"].x)
-            data["pmt"].x = self.pmt_net(data["pmt"].x)
-            data["flash"].x = self.flash_net(data["flash"].x)
+            data["ophit"].x = self.ophit_net(self.ophit_input_norm(data["ophit"].x))
+            data["pmt"].x = self.pmt_net(self.pmt_input_norm(data["pmt"].x))
+            data["flash"].x = self.flash_net(self.flash_input_norm(data["flash"].x))
