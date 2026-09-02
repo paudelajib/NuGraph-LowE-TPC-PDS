@@ -3,6 +3,39 @@ import torch
 from pynuml.data import NuGraphData
 from ...util import InputNorm
 
+# [n_hit, n_spacepoint, n_ophit, total_pe] per event, all log-scaled
+EVT_SEED_FEATURES = 4
+
+# index of "pe" within the 9 raw OpHit features
+# [x, y, z, amplitude, area, pe, peaktime, width, amplitude/area]
+OPHIT_PE_COL = 5
+
+
+def _per_event(data, node_type: str, n_evt: int, device,
+               weights: torch.Tensor = None) -> torch.Tensor:
+    """Sum `weights` (or count nodes) of `node_type` within each event.
+
+    Returns zeros when the node type is absent or empty, so the seed keeps a
+    fixed width whether or not the optical branch is enabled.
+    """
+    if node_type not in data.node_types:
+        return torch.zeros(n_evt, device=device)
+    store = data[node_type]
+    n = store.num_nodes
+    if not n:
+        return torch.zeros(n_evt, device=device)
+
+    # a batched graph carries per-node event indices; a single graph does not
+    idx = getattr(store, "batch", None)
+    if idx is None:
+        idx = torch.zeros(n, dtype=torch.long, device=device)
+    w = torch.ones(n, device=device) if weights is None else weights.to(device)
+
+    out = torch.zeros(n_evt, device=device)
+    out.index_add_(0, idx, w)
+    return out
+
+
 class Encoder(torch.nn.Module):
     """
     NuGraph3 encoder
@@ -56,6 +89,23 @@ class Encoder(torch.nn.Module):
             self.pmt_net = torch.nn.Linear(4, pmt_features)
             self.flash_net = torch.nn.Linear(10, flash_features)
 
+        # Event node seed.
+        #
+        # This used to start at zeros, so everything the event node learned
+        # arrived through softmax aggregation - a weighted MEAN, which is
+        # count-invariant. Yet OpHit multiplicity is the single most
+        # discriminating quantity we measured (AUC 0.757, against 0.725 for the
+        # whole network), and no path through flash.totalpe or pmt.sumpe carries
+        # a count: those are sums of photoelectrons, not numbers of hits.
+        #
+        # Seeding the event node with log-scaled extensive quantities gives it
+        # that information directly and lets message passing add topology on
+        # top. Log scaling because these span orders of magnitude and only their
+        # ratios carry meaning. Always four features, zero-filled when the
+        # optical branch is absent, so the state dict does not depend on flags.
+        self.evt_input_norm = InputNorm(EVT_SEED_FEATURES)
+        self.evt_net = torch.nn.Linear(EVT_SEED_FEATURES, interaction_features)
+
     def forward(self, data: NuGraphData) -> None:
         """
         NuGraph3 encoder forward pass
@@ -72,9 +122,23 @@ class Encoder(torch.nn.Module):
             data["sp"].x = torch.zeros(data["sp"].num_nodes,
                                        self.nexus_features,
                                        device=data["hit"].x.device)
-        data["evt"].x = torch.zeros(data["evt"].num_nodes,
-                                    self.interaction_features,
-                                    device=data["hit"].x.device)
+        # Seed the event node with per-event extensive quantities. Computed from
+        # the RAW optical features, so this must run before ophit_net rewrites
+        # data["ophit"].x below.
+        device = data["hit"].x.device
+        n_evt = data["evt"].num_nodes
+        has_optical = ("ophit" in data.node_types
+                       and data["ophit"].x is not None
+                       and data["ophit"].x.numel() > 0)
+        seed = torch.stack([
+            _per_event(data, "hit", n_evt, device),
+            _per_event(data, "sp", n_evt, device),
+            _per_event(data, "ophit", n_evt, device),
+            _per_event(data, "ophit", n_evt, device,
+                       weights=data["ophit"].x[:, OPHIT_PE_COL].clamp(min=0))
+            if has_optical else torch.zeros(n_evt, device=device),
+        ], dim=1)
+        data["evt"].x = self.evt_net(self.evt_input_norm(torch.log1p(seed)))
 
         if hasattr(self, "ophit_net"):
             data["ophit"].x = self.ophit_net(self.ophit_input_norm(data["ophit"].x))
