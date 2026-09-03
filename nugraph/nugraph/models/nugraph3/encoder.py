@@ -55,7 +55,8 @@ class Encoder(torch.nn.Module):
                  pmt_features: int,
                  flash_features: int,
                  use_optical: bool,
-                 sp_features: int = 0):
+                 sp_features: int = 0,
+                 use_evt_seed: bool = False):
         super().__init__()
         self.input_norm = InputNorm(in_features)
         self.planar_net = torch.nn.Linear(in_features, planar_features)
@@ -102,9 +103,16 @@ class Encoder(torch.nn.Module):
         # that information directly and lets message passing add topology on
         # top. Log scaling because these span orders of magnitude and only their
         # ratios carry meaning. Always four features, zero-filled when the
-        # optical branch is absent, so the state dict does not depend on flags.
-        self.evt_input_norm = InputNorm(EVT_SEED_FEATURES)
-        self.evt_net = torch.nn.Linear(EVT_SEED_FEATURES, interaction_features)
+        # optical branch is absent, so the seed width does not depend on flags.
+        #
+        # Opt-in, because building it unconditionally puts evt_net and
+        # evt_input_norm in the state dict and makes every checkpoint trained
+        # before this existed fail to load with strict=True. Behind the flag,
+        # an older checkpoint reconstructs its original zero-init architecture,
+        # and a newer one is loaded by passing use_evt_seed=True.
+        if use_evt_seed:
+            self.evt_input_norm = InputNorm(EVT_SEED_FEATURES)
+            self.evt_net = torch.nn.Linear(EVT_SEED_FEATURES, interaction_features)
 
     def forward(self, data: NuGraphData) -> None:
         """
@@ -130,15 +138,19 @@ class Encoder(torch.nn.Module):
         has_optical = ("ophit" in data.node_types
                        and data["ophit"].x is not None
                        and data["ophit"].x.numel() > 0)
-        seed = torch.stack([
-            _per_event(data, "hit", n_evt, device),
-            _per_event(data, "sp", n_evt, device),
-            _per_event(data, "ophit", n_evt, device),
-            _per_event(data, "ophit", n_evt, device,
-                       weights=data["ophit"].x[:, OPHIT_PE_COL].clamp(min=0))
-            if has_optical else torch.zeros(n_evt, device=device),
-        ], dim=1)
-        data["evt"].x = self.evt_net(self.evt_input_norm(torch.log1p(seed)))
+        if hasattr(self, "evt_net"):
+            seed = torch.stack([
+                _per_event(data, "hit", n_evt, device),
+                _per_event(data, "sp", n_evt, device),
+                _per_event(data, "ophit", n_evt, device),
+                _per_event(data, "ophit", n_evt, device,
+                           weights=data["ophit"].x[:, OPHIT_PE_COL].clamp(min=0))
+                if has_optical else torch.zeros(n_evt, device=device),
+            ], dim=1)
+            data["evt"].x = self.evt_net(self.evt_input_norm(torch.log1p(seed)))
+        else:
+            data["evt"].x = torch.zeros(n_evt, self.interaction_features,
+                                        device=device)
 
         if hasattr(self, "ophit_net"):
             data["ophit"].x = self.ophit_net(self.ophit_input_norm(data["ophit"].x))
