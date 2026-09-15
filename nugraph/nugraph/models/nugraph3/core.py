@@ -48,13 +48,15 @@ class NuGraphBlock(MessagePassing): # pylint: disable=abstract-method
             edge_index: Edge index tensor
             edge_attr: Edge attribute tensor, required iff edge_features > 0
         """
-        if self.edge_features:
-            if edge_attr is None:
-                raise RuntimeError(
-                    f"block built with edge_features={self.edge_features} "
-                    "but called without edge attributes")
-            return self.propagate(edge_index, x=x, edge_attr=edge_attr)
-        return self.propagate(edge_index, x=x)
+        if self.edge_features and edge_attr is None:
+            raise RuntimeError(
+                f"block built with edge_features={self.edge_features} "
+                "but called without edge attributes")
+        # PyG generates propagate() from message()'s signature and does not
+        # carry Python defaults over, so edge_attr is a required argument for
+        # every block - pass it even when it is None. message() then takes the
+        # original two-input path, so blocks without edge features are unchanged.
+        return self.propagate(edge_index, x=x, edge_attr=edge_attr)
 
     def message(self, x_i: T, x_j: T, edge_attr: T = None) -> T: # pylint: disable=arguments-differ
         """
