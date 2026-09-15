@@ -14,6 +14,7 @@ from .transform import Transform
 from .encoder import Encoder
 from .core import NuGraphCore
 from .optical import NuGraphOptical
+from .edge_geometry import EdgeGeometry
 from .decoders import (SemanticDecoder, FilterDecoder, EventDecoder, VertexDecoder, DirectionDecoder, InstanceDecoder,
                        SpacepointDecoder)
 
@@ -80,6 +81,7 @@ class NuGraph3(LightningModule):
                   use_pmt_pmt: bool = False,
                   use_ophit_ophit: bool = False,
                   use_evt_seed: bool = False,
+                  use_edge_attr: bool = False,
                  use_checkpointing: bool = False,
                  lr: float = 0.001):
         super().__init__()
@@ -107,7 +109,8 @@ class NuGraph3(LightningModule):
         self.core_net = NuGraphCore(hit_features,
                                     nexus_features,
                                     interaction_features,
-                                    use_checkpointing)
+                                    use_checkpointing,
+                                    use_edge_attr=use_edge_attr)
 
         if self.use_optical:
             self.optical_net = NuGraphOptical(interaction_features=interaction_features,
@@ -118,7 +121,13 @@ class NuGraph3(LightningModule):
                                               use_checkpointing=use_checkpointing,
                                               optical_only=use_optical_only,
                                               use_pmt_pmt=use_pmt_pmt,
-                                              use_ophit_ophit=use_ophit_ophit)
+                                              use_ophit_ophit=use_ophit_ophit,
+                                              use_edge_attr=use_edge_attr)
+
+        # geometric edge attributes: computed once per forward pass from
+        # positions already in the graph, so no reprocessing is needed
+        self.edge_geometry = (EdgeGeometry(self.use_optical, use_pmt_pmt, use_ophit_ophit)
+                              if use_edge_attr else None)
 
         self.decoders = []
 
@@ -165,12 +174,18 @@ class NuGraph3(LightningModule):
             data: Graph data object
             stage: String tag defining the step type
         """
+        # before the encoder: OpHit time is read from the raw ophit.x,
+        # which the encoder overwrites
+        if self.edge_geometry is not None:
+            self.edge_geometry(data)
         self.encoder(data)
         for _ in range(self.num_iters):
             if not self.use_optical_only:
                 self.core_net(data)
             if hasattr(self, "optical_net"):
                 self.optical_net(data)
+        if self.edge_geometry is not None:
+            self.edge_geometry.clear(data)
         total_loss = 0.
         total_metrics = {}
         for decoder in self.decoders:
@@ -301,6 +316,10 @@ class NuGraph3(LightningModule):
                                 'processed with ophit-to-ophit edges')
         # Opt-in for the same reason: it adds parameters, so checkpoints from
         # before it existed only load when it is off.
+        model.add_argument('--edge-attr', action='store_true',
+                           help='Give geometric edges (Delaunay, sp-pmt, pmt-pmt, '
+                                'ophit-ophit) their coordinate separation as attention '
+                                'input. Uses positions already in the graph')
         model.add_argument('--evt-seed', action='store_true',
                            help='Seed the event node with per-event counts '
                                 '[n_hit, n_sp, n_ophit, total_pe] instead of zeros')
@@ -348,5 +367,6 @@ class NuGraph3(LightningModule):
             use_pmt_pmt=(args.optical or args.opticalonly),
             use_ophit_ophit=args.ophit_ophit,
             use_evt_seed=args.evt_seed,
+            use_edge_attr=args.edge_attr,
             use_checkpointing=args.use_checkpointing,
             lr=args.learning_rate)

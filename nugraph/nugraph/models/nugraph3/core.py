@@ -4,6 +4,7 @@ from torch import nn
 from torch.utils.checkpoint import checkpoint
 from torch_geometric.nn import MessagePassing
 from .types import T, TD, Data
+from .edge_geometry import PLANE_FEATURES
 
 class NuGraphBlock(MessagePassing): # pylint: disable=abstract-method
     """
@@ -19,13 +20,17 @@ class NuGraphBlock(MessagePassing): # pylint: disable=abstract-method
         source_features: Number of source node input features
         target_features: Number of target node input features
         out_features: Number of target node output features
+        edge_features: Number of edge attributes fed to the attention weight.
+            0 (default) reproduces the original block exactly, so checkpoints
+            trained without edge attributes still load.
     """
     def __init__(self, source_features: int, target_features: int,
-                 out_features: int):
+                 out_features: int, edge_features: int = 0):
         super().__init__(aggr="softmax")
 
+        self.edge_features = edge_features
         self.edge_net = nn.Sequential(
-            nn.Linear(source_features+target_features, 1),
+            nn.Linear(source_features+target_features+edge_features, 1),
             nn.Sigmoid())
 
         self.net = nn.Sequential(
@@ -34,30 +39,40 @@ class NuGraphBlock(MessagePassing): # pylint: disable=abstract-method
             nn.Linear(out_features, out_features),
             nn.Mish())
 
-    def forward(self, x: T, edge_index: T) -> T: # pylint: disable=arguments-differ
+    def forward(self, x: T, edge_index: T, edge_attr: T = None) -> T: # pylint: disable=arguments-differ
         """
         NuGraphBlock forward pass
-        
+
         Args:
             x: Node feature tensor
             edge_index: Edge index tensor
+            edge_attr: Edge attribute tensor, required iff edge_features > 0
         """
+        if self.edge_features:
+            if edge_attr is None:
+                raise RuntimeError(
+                    f"block built with edge_features={self.edge_features} "
+                    "but called without edge attributes")
+            return self.propagate(edge_index, x=x, edge_attr=edge_attr)
         return self.propagate(edge_index, x=x)
 
-    def message(self, x_i: T, x_j: T) -> T: # pylint: disable=arguments-differ
+    def message(self, x_i: T, x_j: T, edge_attr: T = None) -> T: # pylint: disable=arguments-differ
         """
         NuGraphBlock message function
 
         This function constructs messages on graph edges. Features from the
-        source and target nodes are concatenated and fed into a linear layer
-        to construct attention weights. Messages are then formed on edges by
-        weighting the source node features by these attention weights.
-        
+        source and target nodes, plus any edge attributes, are concatenated
+        and fed into a linear layer to construct attention weights. Messages
+        are then formed on edges by weighting the source node features by
+        these attention weights.
+
         Args:
             x_i: Edge features from target nodes
             x_j: Edge features from source nodes
+            edge_attr: Optional geometric attributes of each edge
         """
-        return self.edge_net(torch.cat((x_i, x_j), dim=1).detach()) * x_j
+        z = (x_i, x_j) if edge_attr is None else (x_i, x_j, edge_attr)
+        return self.edge_net(torch.cat(z, dim=1).detach()) * x_j
 
     def update(self, aggr_out: T, x: T) -> T: # pylint: disable=arguments-differ
         """
@@ -85,19 +100,24 @@ class NuGraphCore(nn.Module):
         nexus_features: Number of features in nexus embedding
         interaction_features: Number of features in interaction embedding
         use_checkpointing: Whether to use checkpointing
+        use_edge_attr: Whether planar (Delaunay) edges carry geometric attributes
     """
     def __init__(self,
                  hit_features: int,
                  nexus_features: int,
                  interaction_features: int,
-                 use_checkpointing: bool = True):
+                 use_checkpointing: bool = True,
+                 use_edge_attr: bool = False):
         super().__init__()
 
         self.use_checkpointing = use_checkpointing
+        self.use_edge_attr = use_edge_attr
 
-        # internal planar message-passing
+        # internal planar message-passing; the only core edge with geometry,
+        # since the others are containment
         self.plane_net = NuGraphBlock(hit_features, hit_features,
-                                      hit_features)
+                                      hit_features,
+                                      edge_features=PLANE_FEATURES if use_edge_attr else 0)
 
         # message-passing from planar nodes to nexus nodes
         self.plane_to_nexus = NuGraphBlock(hit_features, nexus_features,
@@ -139,9 +159,10 @@ class NuGraphCore(nn.Module):
         """
 
         # message-passing in hits
+        planar = data["hit", "delaunay-planar", "hit"]
         data["hit"].x = self.checkpoint(
-            self.plane_net, data["hit"].x,
-            data["hit", "delaunay-planar", "hit"].edge_index)
+            self.plane_net, data["hit"].x, planar.edge_index,
+            *((planar.edge_attr,) if self.use_edge_attr else ()))
 
         # message-passing from hits to nexus
         data["sp"].x = self.checkpoint(

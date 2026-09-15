@@ -3,6 +3,7 @@ import torch
 from pynuml.data import NuGraphData
 from .core import NuGraphBlock
 from .types import TD
+from .edge_geometry import NEXUS_PMT_FEATURES, PMT_PMT_FEATURES, OPHIT_OPHIT_FEATURES
 
 class NuGraphOptical(torch.nn.Module):
         """
@@ -26,13 +27,17 @@ class NuGraphOptical(torch.nn.Module):
                      use_checkpointing: bool = True,
                      optical_only: bool = False,
                      use_pmt_pmt: bool = False,
-                     use_ophit_ophit: bool = False):
+                     use_ophit_ophit: bool = False,
+                     use_edge_attr: bool = False):
                 super().__init__()
 
                 self.use_checkpointing = use_checkpointing
                 self.optical_only = optical_only
                 self.use_pmt_pmt = use_pmt_pmt
                 self.use_ophit_ophit = use_ophit_ophit
+                self.use_edge_attr = use_edge_attr
+                # geometric edge types get attributes; containment edges do not
+                ef = lambda n: n if use_edge_attr else 0
 
                 # hierarchical message-passing for optical system
                 self.ophit_to_pmt = NuGraphBlock(ophit_features, pmt_features, pmt_features)
@@ -47,16 +52,26 @@ class NuGraphOptical(torch.nn.Module):
 
                 # message-passing between PMT nodes
                 if self.use_pmt_pmt:
-                        self.pmt_to_pmt = NuGraphBlock(pmt_features, pmt_features, pmt_features)
+                        self.pmt_to_pmt = NuGraphBlock(pmt_features, pmt_features, pmt_features,
+                                                       edge_features=ef(PMT_PMT_FEATURES))
 
-                # message-passing between OpHit nodes
+                # message-passing between OpHit nodes. The edges are built from
+                # separation in (y, z) and time; with edge attributes the
+                # network sees that separation instead of just the connection.
                 if self.use_ophit_ophit:
                         self.ophit_to_ophit = NuGraphBlock(ophit_features, ophit_features,
-                                                           ophit_features)
+                                                           ophit_features,
+                                                           edge_features=ef(OPHIT_OPHIT_FEATURES))
 
                 # message-passing between nexus nodes and PMT nodes (opflashsumpe)
-                self.nexus_to_pmt = NuGraphBlock(nexus_features, pmt_features, pmt_features)
-                self.pmt_to_nexus = NuGraphBlock(pmt_features, nexus_features, nexus_features)
+                self.nexus_to_pmt = NuGraphBlock(nexus_features, pmt_features, pmt_features,
+                                                 edge_features=ef(NEXUS_PMT_FEATURES))
+                self.pmt_to_nexus = NuGraphBlock(pmt_features, nexus_features, nexus_features,
+                                                 edge_features=ef(NEXUS_PMT_FEATURES))
+
+        def _attr(self, store, key: str = "edge_attr") -> tuple:
+                """Edge attributes as extra positional args, or nothing when disabled."""
+                return (store[key],) if self.use_edge_attr else ()
 
         def checkpoint(self, net: torch.nn.Module, *args) -> TD:
                 """
@@ -103,7 +118,8 @@ class NuGraphOptical(torch.nn.Module):
                         data["ophit"].x = self.checkpoint(
                                 self.ophit_to_ophit,
                                 (data["ophit"].x, data["ophit"].x),
-                                ophit_edges.edge_index)
+                                ophit_edges.edge_index,
+                                *self._attr(ophit_edges))
 
                 # message-passing from ophit to pmt
                 data["pmt"].x = self.checkpoint(
@@ -114,9 +130,10 @@ class NuGraphOptical(torch.nn.Module):
                 # Skip this in optical-only mode so TPC/spacepoint information
                 # does not enter the PDS branch.
                 if not self.optical_only:
+                        bridge = data["sp", "knn", "pmt"]
                         data["pmt"].x = self.checkpoint(
                                 self.nexus_to_pmt, (data["sp"].x, data["pmt"].x),
-                                data["sp", "knn", "pmt"].edge_index)
+                                bridge.edge_index, *self._attr(bridge))
 
                 # message-passing from PMTs to PMTs
                 if self.use_pmt_pmt:
@@ -134,7 +151,7 @@ class NuGraphOptical(torch.nn.Module):
                         data["pmt"].x = self.checkpoint(
                                 self.pmt_to_pmt,
                                 (data["pmt"].x, data["pmt"].x),
-                                pmt_edges.edge_index)
+                                pmt_edges.edge_index, *self._attr(pmt_edges))
 
                 # message-passing from pmt to flash
                 data["flash"].x = self.checkpoint(
@@ -159,9 +176,13 @@ class NuGraphOptical(torch.nn.Module):
                 # message-passing from PMTs to space points
                 # Skip this in optical-only mode so PDS does not update TPC/spacepoint nodes.
                 if not self.optical_only:
+                        # reversed edges need the reversed attributes: the
+                        # signed deltas flip, the absolute ones do not
+                        bridge = data["sp", "knn", "pmt"]
                         data["sp"].x = self.checkpoint(
                                 self.pmt_to_nexus, (data["pmt"].x, data["sp"].x),
-                                data["sp", "knn", "pmt"].edge_index[(1,0), :])
+                                bridge.edge_index[(1,0), :],
+                                *self._attr(bridge, "edge_attr_rev"))
 
                 # message-passing from pmt to ophit
                 data["ophit"].x = self.checkpoint(
