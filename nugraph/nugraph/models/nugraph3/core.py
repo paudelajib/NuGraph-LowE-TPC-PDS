@@ -33,8 +33,18 @@ class NuGraphBlock(MessagePassing): # pylint: disable=abstract-method
             nn.Linear(source_features+target_features+edge_features, 1),
             nn.Sigmoid())
 
+        # edge attributes also shape the message itself, not just its weight,
+        # following nugraph/nugraph#169
+        if edge_features:
+            self.msg_net = nn.Sequential(
+                nn.Linear(source_features+edge_features, out_features),
+                nn.Mish())
+        else:
+            self.msg_net = None
+
+        msg_features = out_features if self.msg_net is not None else source_features
         self.net = nn.Sequential(
-            nn.Linear(source_features+target_features, out_features),
+            nn.Linear(msg_features+target_features, out_features),
             nn.Mish(),
             nn.Linear(out_features, out_features),
             nn.Mish())
@@ -74,7 +84,9 @@ class NuGraphBlock(MessagePassing): # pylint: disable=abstract-method
             edge_attr: Optional geometric attributes of each edge
         """
         z = (x_i, x_j) if edge_attr is None else (x_i, x_j, edge_attr)
-        return self.edge_net(torch.cat(z, dim=1).detach()) * x_j
+        attn = self.edge_net(torch.cat(z, dim=1).detach())
+        msg = x_j if self.msg_net is None else self.msg_net(torch.cat((x_j, edge_attr), dim=1))
+        return attn * msg
 
     def update(self, aggr_out: T, x: T) -> T: # pylint: disable=arguments-differ
         """

@@ -13,7 +13,9 @@ OPHIT_OPHIT = ("ophit", "knn", "ophit")
 
 # attributes per edge type: [signed deltas, absolute deltas] over the
 # coordinates the edge is defined in
-PLANE_FEATURES = 4        # (wire, time)
+# Delaunay: [d_integral, d_rms, d_wire, d_time, distance], built in the
+# encoder from normalised hit inputs (nugraph/nugraph#169)
+PLANE_FEATURES = 5
 NEXUS_PMT_FEATURES = 4    # (y, z)
 PMT_PMT_FEATURES = 4      # (y, z)
 OPHIT_OPHIT_FEATURES = 6  # (y, z, time)
@@ -45,8 +47,10 @@ class EdgeGeometry(nn.Module):
     message-passing loop and outside checkpointing, so each normalisation
     updates its running statistics once per batch.
 
-    Containment edges (hit-nexus-sp, sp-in-evt, ophit-in-pmt, pmt-in-flash)
-    have no natural geometry and are left without attributes.
+    Covers the optical edge types only; the Delaunay edges are handled in the
+    encoder, where the normalised hit inputs are available. Containment edges
+    (hit-nexus-sp, sp-in-evt, ophit-in-pmt, pmt-in-flash) have no natural
+    geometry and are left without attributes.
 
     Args:
         use_optical: whether the optical branch is present
@@ -55,7 +59,7 @@ class EdgeGeometry(nn.Module):
     """
     def __init__(self, use_optical: bool, use_pmt_pmt: bool, use_ophit_ophit: bool):
         super().__init__()
-        self.norms = nn.ModuleDict({"plane": InputNorm(PLANE_FEATURES)})
+        self.norms = nn.ModuleDict()
         if use_optical:
             self.norms["nexus_pmt"] = InputNorm(NEXUS_PMT_FEATURES)
             if use_pmt_pmt:
@@ -83,11 +87,6 @@ class EdgeGeometry(nn.Module):
         Args:
             data: batched graph, before the encoder has run
         """
-        if PLANE in data.edge_types:
-            pos = data["hit"].pos
-            data[PLANE].edge_attr = self._norm(
-                "plane", deltas(pos, pos, data[PLANE].edge_index))
-
         if "nexus_pmt" in self.norms and NEXUS_PMT in data.edge_types:
             sp_yz, pmt_yz = data["sp"].pos[:, 1:3], data["pmt"].pos
             ei = data[NEXUS_PMT].edge_index

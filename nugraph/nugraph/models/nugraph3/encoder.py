@@ -56,8 +56,18 @@ class Encoder(torch.nn.Module):
                  flash_features: int,
                  use_optical: bool,
                  sp_features: int = 0,
-                 use_evt_seed: bool = False):
+                 use_evt_seed: bool = False,
+                 use_edge_attr: bool = False):
         super().__init__()
+        # Delaunay edge attributes are built here, from the normalised hit
+        # inputs, following nugraph/nugraph#169. The optical edge types are
+        # handled by EdgeGeometry, which has to run before this encoder
+        # because it reads raw OpHit time.
+        self.use_edge_attr = use_edge_attr
+        if use_edge_attr and in_features < 4:
+            raise ValueError(
+                f"edge attributes need hit columns [wire, time, integral, rms] "
+                f"but in_features={in_features}")
         self.input_norm = InputNorm(in_features)
         self.planar_net = torch.nn.Linear(in_features, planar_features)
         self.nexus_features = nexus_features
@@ -121,8 +131,21 @@ class Encoder(torch.nn.Module):
         Args:
             data: Graph data object
         """
-        data["hit"].x = self.input_norm(data["hit"].x)
-        data["hit"].x = self.planar_net(data["hit"].x)
+        x_in = self.input_norm(data["hit"].x)
+
+        if self.use_edge_attr:
+            # differences between the two endpoints of each Delaunay edge,
+            # taken after normalisation so the distance mixes comparable units
+            planar = data["hit", "delaunay-planar", "hit"]
+            src, dst = planar.edge_index
+            d_wire = x_in[src, 0] - x_in[dst, 0]
+            d_time = x_in[src, 1] - x_in[dst, 1]
+            d_integral = x_in[src, 2] - x_in[dst, 2]
+            d_rms = x_in[src, 3] - x_in[dst, 3]
+            planar.edge_attr = torch.stack(
+                [d_integral, d_rms, d_wire, d_time, torch.hypot(d_wire, d_time)], dim=1)
+
+        data["hit"].x = self.planar_net(x_in)
         if self.sp_net is not None:
             # Encode real spacepoint/nexus input features as the initial sp embedding.
             data["sp"].x = self.sp_net(self.sp_input_norm(data["sp"].x))

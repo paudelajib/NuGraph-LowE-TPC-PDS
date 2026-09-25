@@ -104,7 +104,8 @@ class NuGraph3(LightningModule):
                                nexus_features, interaction_features,
                                ophit_features, pmt_features, flash_features, self.use_optical,
                                sp_features=sp_features,
-                               use_evt_seed=use_evt_seed)
+                               use_evt_seed=use_evt_seed,
+                               use_edge_attr=use_edge_attr)
 
         self.core_net = NuGraphCore(hit_features,
                                     nexus_features,
